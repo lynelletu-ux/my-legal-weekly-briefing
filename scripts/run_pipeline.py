@@ -598,6 +598,7 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
         report["practice_case_discovery"]["query_audit"] = settings.get("_practice_query_audit") or build_query_audit()
         report["practice_case_discovery"]["online_verified"] = bool(settings.get("_practice_query_audit"))
         report["practice_case_discovery"]["source_access_verified"] = bool(report["practice_case_discovery"]["query_audit"] and all(a.get("request_status") == "completed_source" for a in report["practice_case_discovery"]["query_audit"]))
+        report["practice_case_discovery"]["source_adapters"] = settings.get("_source_adapter_report", {})
     except Exception as exc:
         report["practice_case_discovery"] = {"practice_case_candidates": len(practice_rows), "error": str(exc)}
     log_stage(report, "practice_case_discovery", count=len(practice_rows), target=[12, 20], mode=("web_tool_external" if settings.get("_practice_query_audit") else "adapter_feed") if practice_rows else "no_adapter_feed")
