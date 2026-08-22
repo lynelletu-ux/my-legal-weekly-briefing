@@ -832,7 +832,8 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
         from practice_case_discovery import summarize as summarize_practice_cases
         practice_selected = [c for c in ai_selected + legal_selected + report["radar"] if c.get("practice_case")]
         report["practice_case_discovery"].update(summarize_practice_cases(practice_rows, practice_selected))
-        report["practice_case_discovery"]["profile_case_hit_rate"] = round(sum(1 for c in practice_selected if c.get("profile_core_hit")) / max(1, len(practice_selected)), 3)
+        selected_core_cases = [c for c in legal_selected if c.get("practice_case")]
+        report["practice_case_discovery"]["profile_case_hit_rate"] = round(sum(1 for c in selected_core_cases if c.get("profile_core_hit")) / max(1, len(selected_core_cases)), 3)
         report["practice_case_discovery"]["selected_practice_cases"] = len([c for c in legal_selected if c.get("practice_case")])
         report["practice_case_discovery"]["practice_case_shortage"] = report["practice_case_discovery"].get("practice_case_candidates", 0) < 12
     except Exception as exc:
