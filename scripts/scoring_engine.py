@@ -36,7 +36,8 @@ DEFAULT_LEGAL_WEIGHTS = {
 }
 DEFAULT_AI_LEGAL_WEIGHTS = {'signal_strength': 0.50, 'depth': 0.25, 'relevance': 0.15, 'domestic_relevance': 0.10, 'author_tier': 0.00, 'platform_tier': 0.00}
 DEFAULT_INTEREST_KW = ['婚姻', '家事', '抚养', '继承', '离婚', '恋爱', '公司', '股东', '股权', '法人', '商标', '医疗', '诊疗', '知情']
-DEFAULT_TRAINING = BASE / ".workbuddy" / "memory" / "scoring-training.jsonl"
+# 即使未安装 PyYAML，也必须使用仓库随附训练集，不能悄悄降级为空训练集。
+DEFAULT_TRAINING = BASE.parent / "assets" / "data" / "scoring-training.jsonl"
 
 # ── v3 旧→新 特征映射（训练集向后兼容）──
 # 62 条训练集仍是老四维，运行时动态映射为新七维近似值

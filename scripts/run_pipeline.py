@@ -50,6 +50,16 @@ def load_settings():
         return yaml.safe_load(f) or {}
 
 
+def output_dir(settings):
+    """解析用户可直接读取的交付目录，并在运行时创建它。"""
+    raw = (settings.get('output', {}) or {}).get('artifacts_dir', '../outputs')
+    path = Path(raw)
+    if not path.is_absolute():
+        path = BASE / path
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def preflight_channels() -> dict:
     """四层降级链前置检查（P4 新增，替代原 MP session 检查）。
 
@@ -238,7 +248,7 @@ def default_write_report(candidates, scored):
     max_per_source = out.get('max_per_source', 2)
     ai_count = out.get('ai_legal_count', 3)
     legal_count = out.get('legal_count', 7)
-    path = BASE / template.format(date=date.today().isoformat())
+    path = output_dir(settings) / template.format(date=date.today().isoformat())
 
     # Diversity-aware selection
     score_floor = out.get('select_score_floor', 0)
@@ -435,7 +445,7 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
                 "recommend": c.get("recommend", ""),
             })
         html_out = _render(html_articles, date.today().strftime('%Y年%m月%d日'))
-        html_path = BASE / f"周报_{date.today().isoformat()}.html"
+        html_path = output_dir(settings) / f"周报_{date.today().isoformat()}.html"
         html_path.write_text(html_out, encoding="utf-8")
         report["html_path"] = str(html_path)
         log_stage(report, "render_html", path=str(html_path))
@@ -443,22 +453,31 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
         report["errors"].append(f"render_html 失败: {e}")
         log_stage(report, "render_html", status="degraded", error=str(e))
 
-    # Stage 5: IMA 导入（默认写队列，启用了阈值过滤）
-    if import_fn is None:
-        from ima_importer import import_one
-        def import_fn(items):
-            return [import_one(c['url'], c.get('title', '')) for c in items]
+    # Stage 5: IMA 导入。个人版默认禁用，保留全部导入代码供日后显式启用。
+    ima_enabled = bool((settings.get('ima', {}) or {}).get('enabled', False))
+    if not ima_enabled:
+        results = []
+        report["counts"]["imported"] = 0
+        log_stage(report, "import", status="disabled", queued=0, total=0)
+    else:
+        if import_fn is None:
+            from ima_importer import import_one
+            def import_fn(items):
+                return [import_one(c['url'], c.get('title', '')) for c in items]
+        threshold = (settings.get('output', {}) or {}).get('ima_import_threshold', 0)
+        court_sources = {'山东高法', '上海一中院', '上海二中院', '中国应用法学', '最高法', '国务院/部委'}
+        importable = [c for c in scored
+                      if c.get('score', 0) >= threshold
+                      and classify_source(c) in court_sources]
+        results = import_fn(importable)
+        queued = sum(1 for r in results if r.get('status') in ('imported', 'queued'))
+        report["counts"]["imported"] = queued
+        log_stage(report, "import", queued=queued, total=len(results))
 
-    # IMA 导入阈值：仅导入分数 >= 阈值 且 来源为法院/官方公众号的条目
-    threshold = (settings.get('output', {}) or {}).get('ima_import_threshold', 0)
-    court_sources = {'山东高法', '上海一中院', '上海二中院', '中国应用法学', '最高法', '国务院/部委'}
-    importable = [c for c in scored
-                  if c.get('score', 0) >= threshold
-                  and classify_source(c) in court_sources]
-    results = import_fn(importable)
-    queued = sum(1 for r in results if r.get('status') in ('imported', 'queued'))
-    report["counts"]["imported"] = queued
-    log_stage(report, "import", queued=queued, total=len(results))
+    # ChatGPT/自动化可直接消费的完整机器可读交付物。
+    report["articles"] = ai_selected + legal_selected
+    report["radar"] = legal_remaining
+    report["ima_enabled"] = ima_enabled
 
     # 自检
     ok, failures = self_check(report, settings)
@@ -467,6 +486,10 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
     # 写 run-report.json
     with open(BASE / "run-report.json", 'w') as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
+    machine_template = (settings.get('output', {}) or {}).get('machine_report_template', 'weekly-briefing-{date}.json')
+    machine_path = output_dir(settings) / machine_template.format(date=date.today().isoformat())
+    machine_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+    report["machine_report_path"] = str(machine_path)
 
     exit_code = 0 if ok else 1
     return exit_code, report

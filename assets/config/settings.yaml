@@ -60,8 +60,12 @@ scoring:
     - "追偿"
 
 output:
+  # 供 ChatGPT/其他工具读取的交付目录；运行产物不提交 Git。
+  artifacts_dir: "../outputs"
   # 周报文件名模板
   report_template: "周报_{date}.md"
+  # 机器可读周报（入选、雷达、评分和运行元数据）
+  machine_report_template: "weekly-briefing-{date}.json"
   # 候选池最小数量（自检断言用）
   min_candidates: 10
   # 交付条数
@@ -83,3 +87,8 @@ pipeline:
   retry_backoff: 2
   # 运行日志目录
   runs_dir: ".workbuddy/runs"
+
+# IMA 代码完整保留，但个人版初始化默认不生成入库队列、更不会调用 API。
+# 未来只在你确认使用“自己创建的个人 IMA 知识库”后再改为 true。
+ima:
+  enabled: false

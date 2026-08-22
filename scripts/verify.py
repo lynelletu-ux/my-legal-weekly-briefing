@@ -11,7 +11,7 @@
 
 全部通过 → 退出码 0；任一失败 → 退出码 1。
 """
-import json, sys, os
+import json, sys, os, tempfile
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent.parent
@@ -190,7 +190,9 @@ def run_channel_gate():
     if exists:
         try:
             import py_compile
-            py_compile.compile(str(fww), doraise=True)
+            # 指定临时 pyc 路径，避免受只读的用户缓存目录影响。
+            pyc_path = Path(tempfile.gettempdir()) / "legal-weekly-fetch-weread.pyc"
+            py_compile.compile(str(fww), cfile=str(pyc_path), doraise=True)
             compiles = True
         except Exception:
             compiles = False

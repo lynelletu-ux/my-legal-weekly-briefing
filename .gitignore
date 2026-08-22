@@ -26,7 +26,31 @@ candidates_merged.jsonl
 config/.env
 .env
 .env.*
+!.env.example
 .workbuddy/
+
+# 个人画像与本地密钥配置（示例文件可提交，真实文件不可提交）
+assets/config/*.local.yaml
+assets/config/*.local.yml
+!assets/config/*.local.yaml.example
+!assets/config/*.local.yml.example
+config/*.local.yaml
+config/*.local.yml
+
+# 浏览器/自动化会话与导出的认证材料
+cookies.json
+*.cookies.json
+storage_state.json
+*.storage-state.json
+playwright/.auth/
+.auth/
+browser-data/
+*.har
+*.pem
+*.p12
+*.pfx
+*.key
+secrets/
 
 # 运行生成文件
 mp_articles.json
@@ -39,3 +63,7 @@ candidates.jsonl
 demo_data_*.json
 *.pyc
 scripts/.workbuddy/
+
+# 本地工作区与面向用户的运行产物
+work/
+outputs/

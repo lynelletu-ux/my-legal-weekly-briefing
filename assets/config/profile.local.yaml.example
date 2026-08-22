@@ -1,0 +1,22 @@
+# 个人画像覆盖层。复制为 profile.local.yaml 后填写；真实文件已被 .gitignore 排除。
+# 该文件不会包含 Cookie、API Key、浏览器 session 或账号密码。
+profile:
+  display_name: "你的姓名或称呼"
+  jurisdiction:
+    name: "你的主要执业地区"
+    keywords:
+      - "你的省份"
+      - "你的城市"
+      - "你的当地法院"
+  practice_areas:
+    - "你的核心业务领域"
+  interest_keywords:
+    - "你的核心业务领域关键词"
+
+# 微信读书“搜一搜”将按下列公众号名称发现内容；无需填写 fakeid。
+sources:
+  court_accounts:
+    - "你关注的法院或法律公众号"
+
+# 仅在未来明确启用 IMA 时填写到 ~/.config/legal-weekly/taxonomy.local.yaml，
+# 不要在本仓库或本文件中填写 knowledge_base_id、folder_id、client_id 或 api_key。
