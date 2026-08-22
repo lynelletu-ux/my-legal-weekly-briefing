@@ -235,7 +235,9 @@ def main():
     parser.add_argument("--days", type=int, default=7, help="最近N天")
     args = parser.parse_args()
 
-    accounts = ACCOUNTS
+    # 个人版优先读取被 Git 忽略的 profile.local.yaml；缺失时保持原项目四号默认值。
+    from profile_config import court_accounts
+    accounts = court_accounts(ACCOUNTS)
     if args.account:
         accounts = [a for a in ACCOUNTS if args.account.lower() in a.lower()]
 

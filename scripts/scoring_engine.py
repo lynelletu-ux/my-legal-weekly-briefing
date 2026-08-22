@@ -142,7 +142,11 @@ def get_weights(category, settings):
 
 def get_interest_kw(settings):
     sc = settings.get('scoring', {})
-    return sc.get('interest_keywords', DEFAULT_INTEREST_KW)
+    try:
+        from profile_config import interest_keywords as _profile_keywords
+        return _profile_keywords(sc.get('interest_keywords', DEFAULT_INTEREST_KW))
+    except Exception:
+        return sc.get('interest_keywords', DEFAULT_INTEREST_KW)
 
 
 def get_training_path(settings):
@@ -274,7 +278,15 @@ def predict(entry, category='legal'):
 
     # 2026-08-01 用户裁定：不设封顶线，恢复引擎自然打分（k-NN 距离加权 + 兴趣加成），
     # 差异化来自特征标注粒度与训练集锚点；同特征条目同分属 k-NN 正常行为（相同输入=相同输出）
-    return round(predicted + bonus, 1), round(min(1.0, confidence), 2)
+    # 地域加成是个人画像的附加排序信号；全国权威规则返回 0，不会因地域缺失被降权。
+    geographic = 0.0
+    if category == 'legal':
+        try:
+            from profile_config import geographic_bonus
+            geographic = geographic_bonus(entry.get('title', ''), entry.get('source', ''), entry.get('abstract', ''))
+        except Exception:
+            geographic = 0.0
+    return round(predicted + bonus + geographic, 1), round(min(1.0, confidence), 2)
 
 
 if __name__ == '__main__':

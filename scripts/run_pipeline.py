@@ -414,7 +414,10 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
     scored = []
     for c in candidates:
         cat = c.get('category', 'legal')
-        score, conf = predict({"features": c.get('features', {}), "title": c.get('title', '')}, cat)
+        score, conf = predict({
+            "features": c.get('features', {}), "title": c.get('title', ''),
+            "source": c.get('source', ''), "abstract": c.get('abstract', ''),
+        }, cat)
         c['score'] = score
         c['confidence'] = conf
         scored.append(c)
