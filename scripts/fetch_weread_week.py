@@ -32,6 +32,8 @@ STATE_PATHS = [
 ACCOUNTS = ["山东高法", "上海一中法院", "上海二中院", "中国应用法学"]
 
 SEARCH_URL = "https://search.weixin.qq.com/cgi-bin/newsearchweb/userclientjump?path=page/search/weread&query={kw}&platform=pc"
+EVALUATE_TIMEOUT = 45  # 秒：页面结构变化时不能无限卡住整批来源
+ACCOUNT_TIMEOUT = 120  # 秒：单个来源卡住时继续后续来源，并显式报告
 
 
 def parse_date(date_str: str) -> datetime:
@@ -77,7 +79,7 @@ def load_state() -> list:
     return []
 
 
-async def search_account(context, account: str, days: int) -> list:
+async def search_account(context, account: str, days: int, scroll_rounds: int = 6) -> list:
     """搜索一个公众号的文章"""
     page = await context.new_page()
 
@@ -87,7 +89,7 @@ async def search_account(context, account: str, days: int) -> list:
 
     # 滚动加载（最多 6 轮）
     prev = 0
-    for r in range(6):
+    for r in range(scroll_rounds):
         for _ in range(3):
             await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
             await asyncio.sleep(2)
@@ -100,7 +102,7 @@ async def search_account(context, account: str, days: int) -> list:
             break
 
     # 提取元数据
-    arts_json = await page.evaluate("""(() => {
+    arts_json = await asyncio.wait_for(page.evaluate("""(() => {
         const arts = [];
         document.querySelectorAll('.search_list_item').forEach((item, i) => {
             const t = item.querySelector('.article__title-text');
@@ -116,36 +118,41 @@ async def search_account(context, account: str, days: int) -> list:
             });
         });
         return JSON.stringify(arts);
-    })()""")
+    })()"""), timeout=EVALUATE_TIMEOUT)
     arts = json.loads(arts_json)
 
-    # 提取 mp 直链（拦截 window.open）
-    urls_json = await page.evaluate("""(async function() {
-        var sleep = ms => new Promise(r => setTimeout(r, ms));
-        var items = document.querySelectorAll('.search_list_item');
-        var orig = window.open;
-        var results = [];
-        var targets = Array.from({length: items.length}, (_, i) => i);
-        for (var i = 0; i < targets.length; i++) {
-            var captured = '';
-            window.open = function(u) { captured = u; };
-            items[targets[i]].scrollIntoView({block: 'center', behavior: 'instant'});
-            items[targets[i]].click();
-            await sleep(40);
-            results.push({idx: targets[i], url: captured});
-        }
-        window.open = orig;
-        return JSON.stringify(results);
-    })()""")
-    urls = json.loads(urls_json)
-    url_map = {r["idx"]: r["url"] for r in urls}
+    # 先按精确公众号名和时间窗筛掉无关结果，再打开原文链接。
+    # 搜索页常混入转载/百科/旧文；逐条打开会将完整来源池抓取放大数十倍。
+    cutoff = datetime.now(timezone(timedelta(hours=8))) - timedelta(days=days)
+    eligible = []
+    for article in arts:
+        pub = parse_date(article["date"])
+        if article["source"] == account and pub is not None and pub >= cutoff:
+            eligible.append(article["idx"])
+
+    # 提取 mp 直链。2026-08 页面点击会创建新标签页，不再调用 window.open；
+    # 因此逐项监听 context 的 page 事件并读取新页 URL。 
+    url_map = {}
+    items = page.locator(".search_list_item")
+    for idx in eligible:
+        popup_task = asyncio.create_task(context.wait_for_event("page", timeout=5000))
+        try:
+            await items.nth(idx).scroll_into_view_if_needed(timeout=5000)
+            await items.nth(idx).click(timeout=5000)
+            popup = await popup_task
+            # 新标签创建时 URL 已经是公众号原文地址。无需等待微信正文加载：
+            # 这既避免慢资源拖慢整个来源池，也只采集用户要求的原始链接。
+            url_map[idx] = popup.url
+            await popup.close()
+        except Exception:
+            popup_task.cancel()
+            url_map[idx] = ""
 
     # URL 提取诊断：有元数据但直链全空 = 页面结构变化
-    if arts and not any(url_map.values()):
+    if eligible and not any(url_map.values()):
         print(f"  [WARN] {account}: 提取到 {len(arts)} 条元数据但 mp 直链全为空，疑似页面结构变化", file=sys.stderr)
 
     # 合并 + 过滤
-    cutoff = datetime.now(timezone(timedelta(hours=8))) - timedelta(days=days)
     results = []
     seen = set()
     for a in arts:
@@ -171,11 +178,15 @@ async def search_account(context, account: str, days: int) -> list:
             "_source": account,
         })
 
-    await page.close()
+    # 个别搜索页在关闭时会等待未完成的资源请求；关闭失败不能阻塞后续来源。
+    try:
+        await asyncio.wait_for(page.close(), timeout=5)
+    except Exception:
+        pass
     return results
 
 
-async def main_async(accounts, days):
+async def main_async(accounts, days, scroll_rounds=6, output_path=OUT):
     from playwright.async_api import async_playwright
 
     cookies = load_state()
@@ -207,22 +218,22 @@ async def main_async(accounts, days):
         all_articles = []
         empty_accounts = []
         for account in accounts:
-            print(f"搜索: {account} ...")
+            print(f"搜索: {account} ...", flush=True)
             try:
-                arts = await search_account(context, account, days)
-                print(f"  -> {len(arts)} 篇")
+                arts = await asyncio.wait_for(search_account(context, account, days, scroll_rounds), timeout=ACCOUNT_TIMEOUT)
+                print(f"  -> {len(arts)} 篇", flush=True)
                 if not arts:
                     empty_accounts.append(account)
                 all_articles.extend(arts)
             except Exception as e:
-                print(f"  [ERR] {account}: {e}")
+                print(f"  [ERR] {account}: {e}", flush=True)
                 empty_accounts.append(account)
 
         await browser.close()
 
     all_articles.sort(key=lambda x: x.get("publish_time", ""), reverse=True)
-    OUT.write_text(json.dumps(all_articles, ensure_ascii=False, indent=2))
-    print(f"\n总计 {len(all_articles)} 篇，已写入 {OUT}")
+    output_path.write_text(json.dumps(all_articles, ensure_ascii=False, indent=2))
+    print(f"\n总计 {len(all_articles)} 篇，已写入 {output_path}", flush=True)
     for a in all_articles[:10]:
         print(f"  [{a['_source']}] {a['title'][:45]} | {a['publish_time']}")
     if empty_accounts:
@@ -232,18 +243,31 @@ async def main_async(accounts, days):
 def main():
     parser = argparse.ArgumentParser(description="微信读书 公众号文章发现")
     parser.add_argument("--account", type=str, help="只搜索指定公众号")
+    parser.add_argument("--accounts", type=str, help="仅搜索逗号分隔的精确公众号名称")
     parser.add_argument("--days", type=int, default=7, help="最近N天")
+    parser.add_argument("--quick", action="store_true", help="验收用：跳过额外滚动，仅验证首屏真实搜索结果")
+    parser.add_argument("--output", type=Path, default=OUT, help="原始 JSON 产物路径（默认 scripts/mp_articles_weread.json）")
     args = parser.parse_args()
 
     # 个人版优先读取被 Git 忽略的 profile.local.yaml；缺失时保持原项目四号默认值。
     from profile_config import court_accounts
     accounts = court_accounts(ACCOUNTS)
     if args.account:
-        accounts = [a for a in ACCOUNTS if args.account.lower() in a.lower()]
+        accounts = [a for a in accounts if args.account.lower() in a.lower()]
+        if not accounts:
+            print(f"❌ 未找到已配置公众号: {args.account}", file=sys.stderr)
+            sys.exit(1)
+    if args.accounts:
+        requested = {x.strip() for x in args.accounts.split(",") if x.strip()}
+        unknown = requested - set(accounts)
+        if unknown:
+            print(f"❌ 未找到已配置公众号: {', '.join(sorted(unknown))}", file=sys.stderr)
+            sys.exit(1)
+        accounts = [a for a in accounts if a in requested]
 
     print(f"微信读书搜一搜: {len(accounts)} 个公众号, 最近 {args.days} 天")
     print()
-    asyncio.run(main_async(accounts, args.days))
+    asyncio.run(main_async(accounts, args.days, 0 if args.quick else 6, args.output))
 
 
 if __name__ == "__main__":
