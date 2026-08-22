@@ -60,6 +60,7 @@ def main():
     parser.add_argument("--official-feed", type=Path, help="官方 Web 候选 JSON（可选）")
     parser.add_argument("--ai-feed", type=Path, help="AI+法律候选 JSON（可选）")
     parser.add_argument("--practice-case-feed", type=Path, help="专项司法案例候选 JSON（可选；由案例库/法答网适配器生成）")
+    parser.add_argument("--practice-query-audit", type=Path, help="专项查询逐条审计 JSON（必须由真实适配器写出）")
     args = parser.parse_args()
 
     if args.weread_feed:
@@ -82,6 +83,8 @@ def main():
     from run_pipeline import load_settings, run_pipeline
     settings = load_settings()
     settings["discovery_mode"] = "live_in_memory"
+    if args.practice_query_audit:
+        settings["_practice_query_audit"] = json.loads(args.practice_query_audit.read_text(encoding="utf-8"))
     settings.setdefault("output", {})
     if args.window_start:
         settings["output"]["window_start"] = args.window_start

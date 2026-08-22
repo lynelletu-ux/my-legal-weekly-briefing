@@ -16,7 +16,7 @@
 candidates.jsonl 每行: {"title":..., "url":..., "category":"legal|ai-legal", "features":{...}}
 输出: 周报_<date>.md + ima_import_queue.jsonl + run-report.json
 """
-import json, time, sys, re
+import json, time, sys, re, hashlib, uuid, os, tempfile
 from pathlib import Path
 from datetime import date, datetime, timedelta
 from urllib.parse import urlparse
@@ -58,6 +58,58 @@ def output_dir(settings):
         path = BASE / path
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def atomic_write(path, content):
+    """同目录临时文件替换，避免旧产物与新产物混写。"""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def stable_hash(value):
+    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def selected_id(item):
+    return stable_hash({"url": item.get("url", ""), "title": item.get("title", "")})[:16]
+
+
+def selection_snapshot(final_selection):
+    return {
+        key: [{"id": selected_id(x), "title": x.get("title", ""), "url": x.get("url", ""), "score": x.get("score", 0)} for x in final_selection.get(key, [])]
+        for key in ("ai", "legal", "radar")
+    }
+
+
+def artifact_consistency_check(report, markdown_path, html_path):
+    """校验三类产物均携带同一 final_selection 快照。"""
+    expected = selection_snapshot(report.get("final_selection", {}))
+    checks = {"markdown": False, "html": False, "json": False, "run_report": False}
+    try:
+        md = Path(markdown_path).read_text(encoding="utf-8")
+        marker = re.search(r"<!-- codex-final-selection: (.+?) -->", md)
+        checks["markdown"] = bool(marker and json.loads(marker.group(1)) == expected)
+    except Exception:
+        pass
+    try:
+        html = Path(html_path).read_text(encoding="utf-8")
+        marker = re.search(r"<!-- codex-final-selection: (.+?) -->", html)
+        checks["html"] = bool(marker and json.loads(marker.group(1)) == expected)
+    except Exception:
+        pass
+    checks["json"] = selection_snapshot(report.get("final_selection", {})) == expected
+    checks["run_report"] = selection_snapshot(report.get("final_selection", {})) == expected
+    return all(checks.values()), checks
 
 
 def parse_publish_time(value):
@@ -290,22 +342,17 @@ def authority_tier(candidate):
 
 
 def authority_calibrate(candidate, quality_before_authority):
-    """k-NN 后置校准：保留原分数，同时保证明确全国规范层级优先。"""
+    """权威层级只作有限排序微调；不使用 authority floor 抬高质量分。"""
     tier = authority_tier(candidate)
     candidate["authority_rank"] = tier
     candidate["authority_tier"] = {3: "A", 2: "B", 1: "C", 0: "D"}[tier]
-    if tier == 3:
-        # 全国正式规范/高价值案例设最低优先级，但不把所有官方文章统一加分。
-        adjusted = max(quality_before_authority, 9.1)
-        candidate["authority_adjustment_reason"] = "全国正式司法解释/指导性案例/案例库信号，设置 authority floor 9.1"
-    elif tier == 2:
-        adjusted = max(quality_before_authority, 8.7)
-        candidate["authority_adjustment_reason"] = "明确典型案例或裁判要旨，设置较低 priority floor 8.7"
-    else:
-        adjusted = quality_before_authority
-        candidate["authority_adjustment_reason"] = "无明确全国规范层级信号，保留 k-NN 与个人地域排序"
-    candidate["authority_adjustment"] = round(adjusted - quality_before_authority, 1)
-    return round(adjusted, 1)
+    adjustment = {3: 0.8, 2: 0.5, 1: 0.2, 0: 0.0}[tier]
+    candidate["authority_adjustment"] = adjustment
+    candidate["must_consider"] = tier >= 3
+    candidate["priority_lane"] = "authority" if tier >= 3 else "normal"
+    candidate["source_reliability"] = {3: 1.0, 2: 0.9, 1: 0.8, 0: 0.6}[tier]
+    candidate["authority_adjustment_reason"] = "仅作有限排序微调，authority直接加成不超过+0.8"
+    return round(quality_before_authority + adjustment, 1)
 
 
 def select_diverse(scored, category, count, max_per_source, score_floor=0.0, max_per_topic=0, min_profile=0, max_authority=0):
@@ -397,7 +444,7 @@ def default_write_report(candidates, scored, settings_override=None):
     # Diversity-aware selection
     score_floor = out.get('select_score_floor', 0)
     ai_selected, ai_remaining = select_diverse(scored, 'ai-legal', ai_count, max_per_source, score_floor, 0)
-    legal_selected, legal_remaining = select_diverse(scored, 'legal', legal_count, max_per_source, score_floor, max_per_topic, 3, 2)
+    legal_selected, legal_remaining = select_diverse(scored, 'legal', legal_count, max_per_source, score_floor, max_per_topic, 3, 0)
 
     # AI+法律 signal_strength 标签映射
     signal_labels = {1: '格局级', 2: '应用落地级', 3: '融资动态级'}
@@ -454,9 +501,8 @@ def default_write_report(candidates, scored, settings_override=None):
 
         # 雷达区（其他领域速览，2026-08-01 补齐 md 第三板块——SKILL.md 交付格式要求）：
         # 与 HTML 雷达区同规则：未进精选 且 分数低于精选最低分（评分不如精选）
-        featured_scores = [c.get('score', 0) for c in legal_selected]
-        radar_floor = min(featured_scores) if featured_scores else 7.0
-        radar_rows = [c for c in legal_remaining if c.get('score', 0) < radar_floor]
+        # Radar 只使用同一次选择返回的 legal_remaining，禁止 Markdown 重新计算筛选逻辑。
+        radar_rows = legal_remaining[:8]
         if radar_rows:
             f.write("## 其他领域速览（雷达区）\n\n")
             for c in radar_rows[:8]:
@@ -507,7 +553,9 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
         write_report_fn = lambda candidates, scored: default_write_report(candidates, scored, settings)
 
     window_start, window_end = resolve_window(settings)
-    report = {"date": date.today().isoformat(), "window_start": window_start.isoformat(), "window_end": window_end.isoformat(), "stages": [], "counts": {}, "errors": []}
+    run_id = f"{datetime.now().strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:8]}"
+    report = {"run_id": run_id, "date": date.today().isoformat(), "window_start": window_start.isoformat(), "window_end": window_end.isoformat(), "stages": [], "counts": {}, "errors": []}
+    settings["_run_id"] = run_id
 
     # Stage 0: 通道前置检查（四层降级链，P4 新增）
     ch = preflight_channels()
@@ -542,17 +590,20 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
     # 时间门槛、噪音、去重、7维评分、k-NN 和 diversity-aware 选择。
     practice_rows = [c for c in candidates_raw if c.get("practice_case") or c.get("discovery_stage") == "practice_case_discovery"]
     try:
-        from practice_case_discovery import summarize as summarize_practice_cases, query_plan as practice_query_plan
+        from practice_case_discovery import summarize as summarize_practice_cases, query_plan as practice_query_plan, build_query_audit
         report["practice_case_discovery"] = summarize_practice_cases(practice_rows)
         report["practice_case_discovery"]["target_range"] = [12, 20]
         report["practice_case_discovery"]["query_count"] = len(practice_query_plan())
         report["practice_case_discovery"]["query_count_executed"] = max([c.get("practice_query_count_executed", 0) for c in practice_rows] or [0])
+        report["practice_case_discovery"]["query_audit"] = settings.get("_practice_query_audit") or build_query_audit()
+        report["practice_case_discovery"]["online_verified"] = bool(settings.get("_practice_query_audit"))
     except Exception as exc:
         report["practice_case_discovery"] = {"practice_case_candidates": len(practice_rows), "error": str(exc)}
-    log_stage(report, "practice_case_discovery", count=len(practice_rows), target=[12, 20], mode="adapter_feed" if practice_rows else "no_adapter_feed")
+    log_stage(report, "practice_case_discovery", count=len(practice_rows), target=[12, 20], mode=("web_tool_external" if settings.get("_practice_query_audit") else "adapter_feed") if practice_rows else "no_adapter_feed")
 
     # Stage 2: 硬时间门槛（窗口外内容先退出当期期刊；carryover 仅显式标记时允许）
     raw_discovered_count = len(candidates_raw)
+    report["input_hash"] = stable_hash(candidates_raw)
     raw_channel_counts = {}
     for item in candidates_raw:
         channel = item.get("source_channel", "unknown")
@@ -614,6 +665,7 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
     report["counts"]["candidates"] = len(candidates)
     report["counts"]["input_candidates"] = raw_discovered_count
     report["counts"]["dedupe_removed"] = len(candidates_raw) - len(candidates)
+    report["candidate_pool_hash"] = stable_hash(candidates)
     report["counts"]["by_channel_raw"] = raw_channel_counts
     report["counts"]["by_channel"] = {}
     for item in candidates_raw:
@@ -652,6 +704,8 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
         c['region_bonus'] = round(region_bonus, 2)
         c['effective_region_bonus'] = round(region_bonus, 2)
         c['profile_relevance_score'] = profile_relevance_score(c.get('title', ''), c.get('abstract', '')) if cat == 'legal' else 0
+        c['practice_domain_confidence'] = float(c.get('practice_domain_confidence', 1.0 if not c.get('practice_case') else 0.0))
+        c['profile_core_hit'] = bool(c.get('practice_case') and c['practice_domain_confidence'] >= 0.7 and c['profile_relevance_score'] >= 2)
         c['topic_cluster'] = classify_topic(c)
         if cat == 'ai-legal':
             c['ai_topic_cluster'] = c['topic_cluster']
@@ -661,22 +715,18 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
         c['score_adjustment'] = round(c['final_score'] - c['base_quality_score'], 1)
         c['confidence'] = conf
         scored.append(c)
-    # 全国正式规范存在时，地域加成只作为同层级微调：普通地方稿不因 +0.8/+0.6 超过规范层级稿。
-    has_formal_authority = any(c.get("authority_rank", 0) == 3 for c in scored)
-    if has_formal_authority:
-        for c in scored:
-            if c.get("authority_rank", 0) < 3 and c.get("region") in ("深圳", "广东", "粤港澳大湾区", "湖南") and c.get("score", 0) > 9.0:
-                old = c["score"]
-                c["score"] = 9.0
-                c["final_score"] = c["score"]
-                c["authority_adjustment"] = round(c["score"] - (c.get("quality_after_knn", old) + c.get("interest_bonus", 0) + c.get("region_bonus", 0)), 1)
-                c["score_adjustment"] = round(c["score"] - c.get("base_quality_score", old), 1)
-                c["authority_adjustment_reason"] = "存在全国正式规范候选，限制普通地域稿的地域加成排序上限为9.0"
     scored.sort(key=lambda x: x.get('score', 0), reverse=True)
     log_stage(report, "score", count=len(scored))
 
     # Stage 4: 写简报（返回 path + ai_selected + legal_selected）
     report_path, ai_selected, legal_selected, legal_remaining = write_report_fn(candidates, scored)
+    final_selection = {"ai": ai_selected, "legal": legal_selected, "radar": legal_remaining[:8]}
+    report["final_selection"] = final_selection
+    report["selected_ids"] = {k: [selected_id(x) for x in v] for k, v in final_selection.items()}
+    snapshot = json.dumps(selection_snapshot(final_selection), ensure_ascii=False, separators=(",", ":"))
+    md_text = Path(report_path).read_text(encoding="utf-8")
+    md_text = f"<!-- run_id: {run_id} -->\n<!-- input_hash: {report['input_hash']} -->\n<!-- candidate_pool_hash: {report['candidate_pool_hash']} -->\n<!-- codex-final-selection: {snapshot} -->\n" + md_text
+    atomic_write(report_path, md_text)
     selected_urls = {c.get("url") for c in ai_selected + legal_selected}
     radar_urls = {c.get("url") for c in legal_remaining[:8]}
     for item in scored:
@@ -712,7 +762,8 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
             })
         html_out = _render(html_articles, date.today().strftime('%Y年%m月%d日'))
         html_path = output_dir(settings) / f"周报_{date.today().isoformat()}.html"
-        html_path.write_text(html_out, encoding="utf-8")
+        html_out = f"<!-- run_id: {run_id} -->\n<!-- input_hash: {report['input_hash']} -->\n<!-- candidate_pool_hash: {report['candidate_pool_hash']} -->\n<!-- codex-final-selection: {snapshot} -->\n" + html_out
+        atomic_write(html_path, html_out)
         report["html_path"] = str(html_path)
         log_stage(report, "render_html", path=str(html_path))
     except Exception as e:
@@ -765,18 +816,22 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
     report["counts"]["profile_selected"] = len(selected_profile)
     report["profile_qualified_shortage"] = len(profile_qualified) < 3
     if report["profile_qualified_shortage"]:
-        report["errors"].append(f"profile_qualified_shortage: 仅 {len(profile_qualified)} 条画像相关候选达到精选门槛")
+        report.setdefault("warnings", []).append(f"profile_qualified_shortage: 仅 {len(profile_qualified)} 条画像相关候选达到精选门槛")
     report["counts"]["selected_by_channel"] = {}
     for item in report["articles"]:
         channel = item.get("source_channel", "unknown")
         report["counts"]["selected_by_channel"][channel] = report["counts"]["selected_by_channel"].get(channel, 0) + 1
     report["radar"] = legal_remaining[:8]
     report["counts"]["radar"] = len(report["radar"])
+    report["artifact_consistency_check"], report["artifact_consistency_details"] = artifact_consistency_check(report, report_path, report.get("html_path", ""))
+    if not report["artifact_consistency_check"]:
+        report["errors"].append("artifact_consistency_check failed")
     # 专项池验收统计：明确 7d/30d/90d 回溯和最终命中率，不把回溯案例伪装成本周新文。
     try:
         from practice_case_discovery import summarize as summarize_practice_cases
         practice_selected = [c for c in ai_selected + legal_selected + report["radar"] if c.get("practice_case")]
         report["practice_case_discovery"].update(summarize_practice_cases(practice_rows, practice_selected))
+        report["practice_case_discovery"]["profile_case_hit_rate"] = round(sum(1 for c in practice_selected if c.get("profile_core_hit")) / max(1, len(practice_selected)), 3)
         report["practice_case_discovery"]["selected_practice_cases"] = len([c for c in legal_selected if c.get("practice_case")])
         report["practice_case_discovery"]["practice_case_shortage"] = report["practice_case_discovery"].get("practice_case_candidates", 0) < 12
     except Exception as exc:
@@ -786,7 +841,8 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
     # 独立专项案例报告，便于不打开完整周报也能验收检索覆盖。
     try:
         practice_artifact = output_dir(settings) / f"practice-case-discovery-{date.today().isoformat()}.json"
-        practice_artifact.write_text(json.dumps(report.get("practice_case_discovery", {}), ensure_ascii=False, indent=2), encoding="utf-8")
+        practice_payload = {"run_id": run_id, "input_hash": report.get("input_hash"), "candidate_pool_hash": report.get("candidate_pool_hash"), "selected_ids": report.get("selected_ids"), **report.get("practice_case_discovery", {})}
+        atomic_write(practice_artifact, json.dumps(practice_payload, ensure_ascii=False, indent=2))
         report["practice_case_discovery"]["report_path"] = str(practice_artifact)
         practice_md = output_dir(settings) / f"practice-case-discovery-{date.today().isoformat()}.md"
         p = report["practice_case_discovery"]
@@ -794,7 +850,7 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
         lines += [f"- {k}：{v}条" for k, v in p.get("by_practice_domain", {}).items()]
         lines += ["", "## 按来源", ""]
         lines += [f"- {k}：{v}条" for k, v in p.get("by_case_source", {}).items()]
-        practice_md.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        atomic_write(practice_md, f"<!-- run_id: {run_id} -->\n<!-- selected_ids: {json.dumps(report.get('selected_ids'), ensure_ascii=False)} -->\n" + "\n".join(lines) + "\n")
         report["practice_case_discovery"]["markdown_path"] = str(practice_md)
     except Exception as exc:
         report["errors"].append(f"practice_case报告写入失败: {exc}")
@@ -804,14 +860,13 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
     report["self_check"] = {"ok": ok, "failures": failures}
 
     # 写 run-report.json
-    with open(BASE / "run-report.json", 'w') as f:
-        json.dump(report, f, ensure_ascii=False, indent=2)
+    atomic_write(BASE / "run-report.json", json.dumps(report, ensure_ascii=False, indent=2))
     run_report_artifact = output_dir(settings) / f"run-report-{date.today().isoformat()}.json"
-    run_report_artifact.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    atomic_write(run_report_artifact, json.dumps(report, ensure_ascii=False, indent=2))
     report["run_report_path"] = str(run_report_artifact)
     machine_template = (settings.get('output', {}) or {}).get('machine_report_template', 'weekly-briefing-{date}.json')
     machine_path = output_dir(settings) / machine_template.format(date=date.today().isoformat())
-    machine_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+    atomic_write(machine_path, json.dumps(report, ensure_ascii=False, indent=2))
     report["machine_report_path"] = str(machine_path)
 
     exit_code = 0 if ok else 1

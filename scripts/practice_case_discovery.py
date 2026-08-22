@@ -29,6 +29,15 @@ def query_plan():
             for d, queries in PRACTICE_DOMAINS.items() for q in queries]
 
 
+def build_query_audit(execution_mode="adapter_feed", status="not_verified_by_pipeline"):
+    """为57条专项查询生成逐条审计骨架；适配器应覆盖 result/error 字段。"""
+    return [{"query": row["query"], "practice_domain": row["domain"],
+             "target_source": row["sources"][0], "execution_mode": execution_mode,
+             "request_status": status, "result_count_raw": 0,
+             "result_count_valid": 0, "result_urls": [], "error": None,
+             "elapsed": None} for row in query_plan()]
+
+
 def _parse(value):
     if isinstance(value, datetime):
         return value.date()
@@ -79,9 +88,34 @@ def normalize_case_feed(rows, window_start, window_end):
         row.setdefault("source", row.get("institution") or row.get("_source", ""))
         row.setdefault("abstract", row.get("digest", ""))
         row = assign_case_window(row, window_start, window_end)
+        row.setdefault("practice_domain_confidence", domain_confidence(row))
+        # 专项池要求候选必须是可复核裁判材料；对明确的典型案例/案例库材料补齐
+        # 七维特征的“有规则、有案例、可操作”信号，不改变普通资讯评分。
+        text = f"{row.get('title', '')} {row.get('abstract', '')}"
+        if any(k in text for k in ("典型案例", "人民法院案例库", "裁判要旨", "裁判规则")):
+            feat = dict(row.get("features") or {})
+            feat.update({"case_density": 1, "norm_anchoring": 1, "actionability": 1,
+                         "author_empirical_depth": min(feat.get("author_empirical_depth", 2), 2),
+                         "framework_quality": min(feat.get("framework_quality", 2), 2),
+                         "relevance_halflife": min(feat.get("relevance_halflife", 2), 2)})
+            row["features"] = feat
         if row.get("case_window"):
             result.append(row)
     return result
+
+
+def domain_confidence(item):
+    """防止跨领域关键词把行为保全/IP平台责任冒充核心民商事实务。"""
+    text = f"{item.get('title', '')} {item.get('abstract', '')}"
+    domain = item.get("practice_domain", "")
+    if "行为保全" in text and not any(k in text for k in ("执行", "被执行人", "财产保全", "股权冻结")):
+        return 0.4
+    if "知识产权" in text or "专利" in text or "著作权" in text:
+        if domain not in ("合同与债权债务", "民事诉讼程序与证据"):
+            return 0.4
+    if domain in PRACTICE_DOMAINS and any(k in text for k in PRACTICE_DOMAINS[domain]):
+        return 0.9
+    return 0.6 if domain in PRACTICE_DOMAINS else 0.0
 
 
 def summarize(rows, selected=None):

@@ -76,6 +76,11 @@ def dedupe_items(items, threshold=0.85):
                 et = normalize_title(existing.get('title', ''))
                 eu = canonical_url(existing.get('url', ''))
                 if (url and eu == url) or (title and et and similarity(title, et) >= threshold):
+                    # 主记录优先保留权威来源，但把专项案例标记、完整特征和时间窗口
+                    # 从重复渠道合并进来，避免官方/公众号先出现导致案例画像丢失。
+                    for key in ("practice_case", "practice_domain", "practice_domain_confidence", "case_window", "carryover", "discovery_stage", "features"):
+                        if item.get(key) is not None and (not existing.get(key) or key == "features" and len(item.get(key) or {}) > len(existing.get(key) or {})):
+                            existing[key] = item[key]
                     alternates = list(existing.get('alternate_urls') or [])
                     if item.get('url') and item.get('url') != existing.get('url') and item.get('url') not in alternates:
                         alternates.append(item.get('url'))
