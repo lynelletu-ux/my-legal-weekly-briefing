@@ -1,0 +1,26 @@
+# AI+法律近7日发现池（仅用于检索配置，不以旧新闻补足当期候选）
+sources:
+  international:
+    - OpenAI
+    - Anthropic
+    - Google Gemini
+    - Microsoft
+    - Harvey
+    - Thomson Reuters
+    - LexisNexis
+    - Clio
+    - Intapp
+    - vLex
+    - Relativity
+  domestic:
+    - 国内法律AI产品
+    - 国内律所AI落地
+    - 中国司法机关AI应用
+    - 法律AI监管
+    - 法律职业伦理与AI
+queries:
+  - legal AI product launch
+  - law firm AI deployment
+  - legal AI agent workflow
+  - judicial AI application China
+  - legal AI regulation professional responsibility

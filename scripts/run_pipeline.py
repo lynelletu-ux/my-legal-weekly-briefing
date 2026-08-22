@@ -208,26 +208,46 @@ def classify_source(candidate):
 
 
 def classify_topic(candidate):
-    """将候选归入可解释的主题簇，供精选区做第二层 diversity 控制。"""
+    """按法律主题优先级归类；AI 单独使用 ai_topic_cluster。"""
     text = " ".join(str(candidate.get(k, "") or "") for k in ("title", "abstract", "digest"))
+    if candidate.get("category") == "ai-legal":
+        return classify_ai_topic(candidate)
     clusters = [
-        ("环境资源与绿色司法", ("生态", "环境资源", "污染", "绿美", "碳排放", "自然资源", "环境损害")),
-        ("公司股权与治理", ("公司", "股东", "股权", "商事", "法人", "董事")),
-        ("合同债权与违约", ("合同", "债权", "债务", "违约", "履行", "委托", "服务")),
-        ("执行与保全", ("执行", "被执行人", "保全", "冻结", "查封", "执行异议")),
-        ("侵权与损害赔偿", ("侵权", "损害赔偿", "赔偿", "责任", "保险")),
-        ("诉讼程序与证据", ("证据", "举证", "证明", "管辖", "鉴定", "二审", "庭审")),
-        ("建设工程", ("建设工程", "施工", "工程款", "违法分包", "分包")),
-        ("保险与侵权", ("保险", "交通事故", "人身损害", "损害赔偿")),
-        ("知识产权与平台", ("著作权", "商标", "专利", "平台", "网络", "个人信息")),
-        ("劳动", ("劳动", "工伤", "工资", "竞业")),
-        ("行政", ("行政", "行政处罚", "行政许可")),
+        ("环境资源", ("生态", "环境资源", "污染", "绿美", "碳排放", "自然资源", "环境损害")),
+        ("劳动与社会保障", ("住房公积金", "劳动", "工伤", "工资", "社会保障", "社保", "竞业")),
+        ("建设工程房地产", ("建设工程", "施工", "工程款", "违法分包", "分包", "房地产", "房屋", "征收")),
+        ("公司股权", ("公司", "股东", "股权", "治理", "法人", "董事", "商事")),
+        ("执行保全", ("执行", "被执行人", "执行联动", "保全", "冻结", "查封", "执行异议")),
+        ("民事程序与证据", ("证据", "举证", "证明", "民事管辖", "鉴定", "二审", "庭审", "诉讼")),
+        ("合同债权", ("合同", "债权", "债务", "违约", "履行", "委托", "服务", "附随义务")),
+        ("知识产权与平台", ("著作权", "商标", "专利", "平台", "网络")),
+        ("数据与个人信息", ("个人信息", "数据处理", "数据", "隐私")),
+        ("侵权保险", ("保险", "侵权", "交通事故", "人身损害", "损害赔偿", "赔偿", "责任")),
+        ("行政与监管", ("行政", "行政处罚", "行政许可", "监管", "公告", "答记者问", "域外管辖", "补贴调查", "住房公积金管理条例")),
         ("刑事", ("刑事", "犯罪", "公诉", "受贿")),
+        ("婚姻家事", ("婚姻", "离婚", "继承", "抚养", "遗嘱")),
     ]
     for name, keywords in clusters:
         if any(k in text for k in keywords):
             return name
     return "其他法律实务"
+
+
+def classify_ai_topic(candidate):
+    text = " ".join(str(candidate.get(k, "") or "") for k in ("title", "abstract", "digest"))
+    clusters = [
+        ("AI监管与职业责任", ("监管", "职业责任", "professional", "SRA", "伦理", "负责使用")),
+        ("律所AI落地", ("律所", "law firm", "全所", "部署", "法律服务")),
+        ("AI Agent / 工作流", ("Agent", "工作流", "MCP", "事务系统", "litigation")),
+        ("法律检索与知识库", ("检索", "知识库", "precedent", "research")),
+        ("数据安全与AI治理", ("数据安全", "治理", "权限", "隐私")),
+        ("司法智能化", ("法院", "司法机关", "法庭", "审判智能")),
+        ("法律AI产品", ("法律AI", "Legal AI", "Harvey", "Lexis", "Clio", "vLex")),
+    ]
+    for name, keywords in clusters:
+        if any(k.lower() in text.lower() for k in keywords):
+            return name
+    return "其他AI法律"
 
 
 def noise_reason(candidate):
@@ -255,13 +275,17 @@ def noise_reason(candidate):
 
 
 def authority_tier(candidate):
-    """规范层级标签；只识别明确规范/案例信号，不给所有官方稿统一加分。"""
+    """按内容法律效力/裁判指导层级返回 A=3/B=2/C=1/D=0。"""
     text = " ".join(str(candidate.get(k, "") or "") for k in ("title", "abstract", "digest"))
     source = str(candidate.get("source", "") or "")
-    if any(k in text for k in ("司法解释", "法释", "行政法规", "指导性案例", "人民法院案例库", "法答网")):
+    if any(k in text for k in ("司法解释", "法释", "行政法规", "国务院令", "指导性案例", "人民法院案例库", "正式规范性文件")):
         return 3
-    if "典型案例" in text or "裁判要旨" in text:
+    if ("法答网" in text and "征稿" not in text) or (source in ("最高人民法院", "最高人民检察院") and "典型案例" in text) or source in ("广东省高级人民法院", "司法部"):
         return 2
+    if "典型案例" in text or "裁判要旨" in text:
+        return 1
+    if source == "中国应用法学" or "人民法院报" in source or "中级人民法院" in source:
+        return 1
     return 0
 
 
@@ -284,7 +308,7 @@ def authority_calibrate(candidate, quality_before_authority):
     return round(adjusted, 1)
 
 
-def select_diverse(scored, category, count, max_per_source, score_floor=0.0, max_per_topic=0):
+def select_diverse(scored, category, count, max_per_source, score_floor=0.0, max_per_topic=0, min_profile=0, max_authority=0):
     """多样性感知选择：同源和同主题簇均受上限约束。
 
     scored: 已按分数降序排列的候选列表（含 score, category 等字段）
@@ -296,6 +320,9 @@ def select_diverse(scored, category, count, max_per_source, score_floor=0.0, max
     返回: (selected, remaining) — selected 是入选的 N 条，remaining 是未入选的（可用于 IMA 导入）
     """
     cat_items = [c for c in scored if c.get('category') == category or (category == 'legal' and c.get('category') != 'ai-legal')]
+    if category == 'legal' and min_profile:
+        # 仅在质量门槛内优先画像相关候选；不降低 score_floor，也不突破 source/topic 上限。
+        cat_items = sorted(cat_items, key=lambda x: (x.get('authority_rank', 0) >= 2, x.get('score', 0) >= score_floor and x.get('profile_relevance_score', 0) >= 2, x.get('score', 0)), reverse=True)
     if not max_per_source or max_per_source <= 0:
         selected = [c for c in cat_items[:count] if c.get('score', 0) >= score_floor]
         remaining = cat_items[len(selected):]
@@ -303,6 +330,7 @@ def select_diverse(scored, category, count, max_per_source, score_floor=0.0, max
 
     source_counts = {}
     topic_counts = {}
+    authority_count = 0
     selected = []
     remaining = []
     for item in cat_items:
@@ -315,10 +343,13 @@ def select_diverse(scored, category, count, max_per_source, score_floor=0.0, max
         if len(selected) >= count:
             remaining.append(item)
             continue
-        if source_counts.get(s, 0) < max_per_source and (not max_per_topic or topic_counts.get(topic, 0) < max_per_topic):
+        if (source_counts.get(s, 0) < max_per_source and (not max_per_topic or topic_counts.get(topic, 0) < max_per_topic)
+                and (not max_authority or item.get("authority_rank", 0) < 2 or authority_count < max_authority)):
             selected.append(item)
             source_counts[s] = source_counts.get(s, 0) + 1
             topic_counts[topic] = topic_counts.get(topic, 0) + 1
+            if item.get("authority_rank", 0) >= 2:
+                authority_count += 1
         else:
             remaining.append(item)
 
@@ -332,11 +363,14 @@ def select_diverse(scored, category, count, max_per_source, score_floor=0.0, max
                 continue  # 宁缺毋滥：低分条不补位进精选
             topic = classify_topic(item)
             s = classify_source(item)
-            if source_counts.get(s, 0) >= max_per_source or (max_per_topic and topic_counts.get(topic, 0) >= max_per_topic):
+            if (source_counts.get(s, 0) >= max_per_source or (max_per_topic and topic_counts.get(topic, 0) >= max_per_topic)
+                    or (max_authority and item.get("authority_rank", 0) >= 2 and authority_count >= max_authority)):
                 continue
             selected.append(item)
             source_counts[s] = source_counts.get(s, 0) + 1
             topic_counts[topic] = topic_counts.get(topic, 0) + 1
+            if item.get("authority_rank", 0) >= 2:
+                authority_count += 1
             overflow.append(item)
         remaining = [r for r in remaining if r not in overflow]
 
@@ -363,7 +397,7 @@ def default_write_report(candidates, scored, settings_override=None):
     # Diversity-aware selection
     score_floor = out.get('select_score_floor', 0)
     ai_selected, ai_remaining = select_diverse(scored, 'ai-legal', ai_count, max_per_source, score_floor, 0)
-    legal_selected, legal_remaining = select_diverse(scored, 'legal', legal_count, max_per_source, score_floor, max_per_topic)
+    legal_selected, legal_remaining = select_diverse(scored, 'legal', legal_count, max_per_source, score_floor, max_per_topic, 3, 2)
 
     # AI+法律 signal_strength 标签映射
     signal_labels = {1: '格局级', 2: '应用落地级', 3: '融资动态级'}
@@ -574,7 +608,7 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
 
     # Stage 4: 评分（调用 scoring_engine.predict）+ 规范层级后置校准
     from scoring_engine import predict, linear_fallback, get_weights, load_settings as load_scoring_settings
-    from profile_config import geographic_bonus, personalization_bonus
+    from profile_config import effective_geographic_bonus, geographic_bonus, personalization_bonus, profile_relevance_score
     scoring_settings = load_scoring_settings()
     scored = []
     for c in candidates:
@@ -586,7 +620,8 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
         base_quality = linear_fallback(entry, cat, get_weights(cat, scoring_settings))
         knn_prediction, conf = predict(entry, cat, include_bonuses=False)
         interest_bonus, long_matches, dynamic_matches = personalization_bonus(c.get('title', ''), c.get('abstract', ''))
-        region_bonus = geographic_bonus(c.get('title', ''), c.get('source', ''), c.get('abstract', '')) if cat == 'legal' else 0.0
+        region_bonus_raw = geographic_bonus(c.get('title', ''), c.get('source', ''), c.get('abstract', '')) if cat == 'legal' else 0.0
+        region_bonus = effective_geographic_bonus(c.get('title', ''), c.get('source', ''), c.get('abstract', '')) if cat == 'legal' else 0.0
         raw_knn_adjustment = round(knn_prediction - base_quality, 1)
         knn_adjustment = min(raw_knn_adjustment, 0.8)
         quality_after_knn = round(base_quality + knn_adjustment, 1)
@@ -598,8 +633,13 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
         c['interest_bonus'] = interest_bonus
         c['long_term_profile_matches'] = long_matches
         c['dynamic_profile_matches'] = dynamic_matches
-        c['region_bonus'] = round(region_bonus, 1)
+        c['region_bonus_raw'] = round(region_bonus_raw, 1)
+        c['region_bonus'] = round(region_bonus, 2)
+        c['effective_region_bonus'] = round(region_bonus, 2)
+        c['profile_relevance_score'] = profile_relevance_score(c.get('title', ''), c.get('abstract', '')) if cat == 'legal' else 0
         c['topic_cluster'] = classify_topic(c)
+        if cat == 'ai-legal':
+            c['ai_topic_cluster'] = c['topic_cluster']
         c['quality_after_knn'] = quality_after_knn
         c['score'] = authority_calibrate(c, quality_after_knn + interest_bonus + region_bonus)
         c['final_score'] = c['score']
@@ -626,7 +666,8 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
     radar_urls = {c.get("url") for c in legal_remaining[:8]}
     for item in scored:
         if item.get("url") in selected_urls:
-            item["selection_reason"] = "达到精选门槛，并通过来源/主题多样性与规范层级校准"
+            profile_note = "，画像相关候选优先" if item.get("profile_relevance_score", 0) >= 2 else ""
+            item["selection_reason"] = "达到精选门槛，并通过来源/主题多样性与规范层级校准" + profile_note
         elif item.get("url") in radar_urls:
             item["selection_reason"] = "未进入精选，保留为 Radar（评分/主题覆盖价值）"
         else:
@@ -686,6 +727,30 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
 
     # ChatGPT/自动化可直接消费的完整机器可读交付物。
     report["articles"] = ai_selected + legal_selected
+    # 机器审计池包含评分交付、Radar、noise 和时间剔除候选，便于逐条追溯。
+    for excluded in report.get("noise", []) + report.get("time_excluded", []):
+        excluded.setdefault("noise", False)
+        excluded.setdefault("carryover", False)
+        excluded.setdefault("profile_relevance_score", 0)
+        excluded.setdefault("long_term_profile_matches", [])
+        excluded.setdefault("dynamic_profile_matches", [])
+        excluded.setdefault("interest_bonus", 0.0)
+        excluded.setdefault("personalization_bonus", 0.0)
+        excluded.setdefault("region_bonus", 0.0)
+        excluded.setdefault("effective_region_bonus", 0.0)
+        excluded.setdefault("authority_tier", "D")
+        excluded.setdefault("topic_cluster", classify_topic(excluded))
+        for field in ("base_quality_score", "knn_prediction", "knn_score", "knn_adjustment", "final_score", "score"):
+            excluded.setdefault(field, None)
+        excluded.setdefault("selection_reason", excluded.get("noise_reason", excluded.get("time_exclusion_reason", "未进入评分")))
+    report["candidate_audit"] = scored + report.get("noise", []) + report.get("time_excluded", [])
+    profile_qualified = [c for c in scored if c.get("category") != "ai-legal" and c.get("score", 0) >= (settings.get("output", {}) or {}).get("select_score_floor", 0) and c.get("profile_relevance_score", 0) >= 2]
+    selected_profile = [c for c in legal_selected if c.get("profile_relevance_score", 0) >= 2]
+    report["counts"]["profile_qualified"] = len(profile_qualified)
+    report["counts"]["profile_selected"] = len(selected_profile)
+    report["profile_qualified_shortage"] = len(profile_qualified) < 3
+    if report["profile_qualified_shortage"]:
+        report["errors"].append(f"profile_qualified_shortage: 仅 {len(profile_qualified)} 条画像相关候选达到精选门槛")
     report["counts"]["selected_by_channel"] = {}
     for item in report["articles"]:
         channel = item.get("source_channel", "unknown")
