@@ -207,7 +207,7 @@ def linear_fallback(entry, category, weights):
     return max(1.0, min(10.0, score))
 
 
-def predict(entry, category='legal'):
+def predict(entry, category='legal', include_bonuses=True):
     """Predict score and confidence for a single entry."""
     settings = load_settings()
     weights = get_weights(category, settings)
@@ -223,7 +223,7 @@ def predict(entry, category='legal'):
                 if kw in entry['title']:
                     bonus = 0.3
                     break
-        return round(score + bonus, 1), 0.0  # confidence=0 标记冷启动
+        return round(score + (bonus if include_bonuses else 0.0), 1), 0.0  # confidence=0 标记冷启动
 
     pool = [d for d in data if d.get('category', d.get('type', '')) == category]
     if not pool:
@@ -286,7 +286,8 @@ def predict(entry, category='legal'):
             geographic = geographic_bonus(entry.get('title', ''), entry.get('source', ''), entry.get('abstract', ''))
         except Exception:
             geographic = 0.0
-    return round(predicted + bonus + geographic, 1), round(min(1.0, confidence), 2)
+    total = predicted + (bonus + geographic if include_bonuses else 0.0)
+    return round(total, 1), round(min(1.0, confidence), 2)
 
 
 if __name__ == '__main__':

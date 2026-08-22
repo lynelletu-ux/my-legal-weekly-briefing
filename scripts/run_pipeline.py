@@ -18,7 +18,7 @@ candidates.jsonl 每行: {"title":..., "url":..., "category":"legal|ai-legal", "
 """
 import json, time, sys, re
 from pathlib import Path
-from datetime import date
+from datetime import date, datetime, timedelta
 from urllib.parse import urlparse
 
 try:
@@ -58,6 +58,28 @@ def output_dir(settings):
         path = BASE / path
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def parse_publish_time(value):
+    if not value:
+        return None
+    text = str(value).strip().replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(text).date()
+    except ValueError:
+        for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d", "%Y-%m-%d %H:%M"):
+            try:
+                return datetime.strptime(text, fmt).date()
+            except ValueError:
+                continue
+    return None
+
+
+def resolve_window(settings):
+    out = settings.get("output", {}) or {}
+    end = date.fromisoformat(str(out.get("window_end", date.today().isoformat())))
+    start = date.fromisoformat(str(out.get("window_start", (end - timedelta(days=6)).isoformat())))
+    return start, end
 
 
 def preflight_channels() -> dict:
@@ -195,7 +217,12 @@ def classify_topic(candidate):
         ("执行与保全", ("执行", "被执行人", "保全", "冻结", "查封", "执行异议")),
         ("侵权与损害赔偿", ("侵权", "损害赔偿", "赔偿", "责任", "保险")),
         ("诉讼程序与证据", ("证据", "举证", "证明", "管辖", "鉴定", "二审", "庭审")),
+        ("建设工程", ("建设工程", "施工", "工程款", "违法分包", "分包")),
+        ("保险与侵权", ("保险", "交通事故", "人身损害", "损害赔偿")),
         ("知识产权与平台", ("著作权", "商标", "专利", "平台", "网络", "个人信息")),
+        ("劳动", ("劳动", "工伤", "工资", "竞业")),
+        ("行政", ("行政", "行政处罚", "行政许可")),
+        ("刑事", ("刑事", "犯罪", "公诉", "受贿")),
     ]
     for name, keywords in clusters:
         if any(k in text for k in keywords):
@@ -238,22 +265,22 @@ def authority_tier(candidate):
     return 0
 
 
-def authority_calibrate(candidate, knn_score):
+def authority_calibrate(candidate, quality_before_authority):
     """k-NN 后置校准：保留原分数，同时保证明确全国规范层级优先。"""
     tier = authority_tier(candidate)
-    candidate["authority_tier"] = tier
-    candidate["knn_score"] = knn_score
+    candidate["authority_rank"] = tier
+    candidate["authority_tier"] = {3: "A", 2: "B", 1: "C", 0: "D"}[tier]
     if tier == 3:
         # 全国正式规范/高价值案例设最低优先级，但不把所有官方文章统一加分。
-        adjusted = max(knn_score, 9.1)
+        adjusted = max(quality_before_authority, 9.1)
         candidate["authority_adjustment_reason"] = "全国正式司法解释/指导性案例/案例库信号，设置 authority floor 9.1"
     elif tier == 2:
-        adjusted = max(knn_score, 8.7)
+        adjusted = max(quality_before_authority, 8.7)
         candidate["authority_adjustment_reason"] = "明确典型案例或裁判要旨，设置较低 priority floor 8.7"
     else:
-        adjusted = knn_score
+        adjusted = quality_before_authority
         candidate["authority_adjustment_reason"] = "无明确全国规范层级信号，保留 k-NN 与个人地域排序"
-    candidate["score_adjustment"] = round(adjusted - knn_score, 1)
+    candidate["authority_adjustment"] = round(adjusted - quality_before_authority, 1)
     return round(adjusted, 1)
 
 
@@ -331,6 +358,7 @@ def default_write_report(candidates, scored):
     ai_count = out.get('ai_legal_count', 3)
     legal_count = out.get('legal_count', 7)
     path = output_dir(settings) / template.format(date=date.today().isoformat())
+    window_start, window_end = resolve_window(settings)
 
     # Diversity-aware selection
     score_floor = out.get('select_score_floor', 0)
@@ -344,10 +372,7 @@ def default_write_report(candidates, scored):
     from ima_importer import classify as _classify
 
     with open(path, 'w') as f:
-        report_date = date.today().isoformat()
-        window_start = (date.today() - __import__('datetime').timedelta(days=6)).strftime('%Y.%m.%d')
-        window_end = date.today().strftime('%m.%d')
-        f.write(f"# 📰 我的法律实务期刊｜{window_start}—{window_end}｜Codex试行版\n\n")
+        f.write(f"# 📰 我的法律实务期刊｜{window_start.strftime('%Y.%m.%d')}—{window_end.strftime('%m.%d')}｜Codex试行版\n\n")
         f.write("## AI + 法律\n\n")
         for c in ai_selected:
             score = c.get('score', 0)
@@ -445,7 +470,8 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
     if write_report_fn is None:
         write_report_fn = default_write_report
 
-    report = {"date": date.today().isoformat(), "stages": [], "counts": {}, "errors": []}
+    window_start, window_end = resolve_window(settings)
+    report = {"date": date.today().isoformat(), "window_start": window_start.isoformat(), "window_end": window_end.isoformat(), "stages": [], "counts": {}, "errors": []}
 
     # Stage 0: 通道前置检查（四层降级链，P4 新增）
     ch = preflight_channels()
@@ -476,18 +502,41 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
             report["errors"].append(f"discover 降级: {e}")
             log_stage(report, "discover", status="degraded", error=str(e))
 
-    # Stage 2: 评分前噪音过滤（活动/宣传稿不因来源权威而自动获得高分）
+    # Stage 2: 硬时间门槛（窗口外内容先退出当期期刊；carryover 仅显式标记时允许）
     raw_discovered_count = len(candidates_raw)
     raw_channel_counts = {}
     for item in candidates_raw:
         channel = item.get("source_channel", "unknown")
         raw_channel_counts[channel] = raw_channel_counts.get(channel, 0) + 1
+    time_excluded = []
+    time_filtered = []
+    for item in candidates_raw:
+        pub = parse_publish_time(item.get("publish_time") or item.get("date"))
+        if item.get("carryover") is True:
+            item = dict(item)
+            item["carryover"] = True
+            time_filtered.append(item)
+        elif pub is None or not (window_start <= pub <= window_end):
+            excluded = dict(item)
+            excluded["noise"] = False
+            excluded["carryover"] = False
+            excluded["time_exclusion_reason"] = "缺少可解析发布时间" if pub is None else f"发布时间 {pub.isoformat()} 不在窗口 {window_start.isoformat()}—{window_end.isoformat()}"
+            time_excluded.append(excluded)
+        else:
+            time_filtered.append(item)
+    candidates_raw = time_filtered
+    report["time_excluded"] = time_excluded
+    report["counts"]["time_excluded"] = len(time_excluded)
+    log_stage(report, "time_gate", before=raw_discovered_count, after=len(candidates_raw), excluded=len(time_excluded), window_start=window_start.isoformat(), window_end=window_end.isoformat())
+
+    # Stage 3: 评分前噪音过滤（活动/宣传稿不因来源权威而自动获得高分）
     noise_items = []
     filtered_raw = []
     for item in candidates_raw:
         reason = noise_reason(item)
         if reason:
             item = dict(item)
+            item["noise"] = True
             item["noise_reason"] = reason
             noise_items.append(item)
         else:
@@ -504,6 +553,8 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
     # 字段兜底（P4 新增）：新通道 5 字段候选补全 pipeline 必需字段
     # abstract ← digest；category 默认 legal；features 空 dict 由 _infer_features 启发式兜底
     for c in candidates:
+        c.setdefault("noise", False)
+        c.setdefault("carryover", False)
         if not c.get("abstract") and c.get("digest"):
             c["abstract"] = c["digest"]
         c.setdefault("category", "legal")
@@ -522,33 +573,64 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
     log_stage(report, "dedupe", before=len(candidates_raw), after=len(candidates))
 
     # Stage 4: 评分（调用 scoring_engine.predict）+ 规范层级后置校准
-    from scoring_engine import predict
+    from scoring_engine import predict, linear_fallback, get_weights, load_settings as load_scoring_settings
+    from profile_config import geographic_bonus, personalization_bonus
+    scoring_settings = load_scoring_settings()
     scored = []
     for c in candidates:
         cat = c.get('category', 'legal')
-        score, conf = predict({
+        entry = {
             "features": c.get('features', {}), "title": c.get('title', ''),
             "source": c.get('source', ''), "abstract": c.get('abstract', ''),
-        }, cat)
-        c['knn_score'] = score
+        }
+        base_quality = linear_fallback(entry, cat, get_weights(cat, scoring_settings))
+        knn_prediction, conf = predict(entry, cat, include_bonuses=False)
+        interest_bonus, long_matches, dynamic_matches = personalization_bonus(c.get('title', ''), c.get('abstract', ''))
+        region_bonus = geographic_bonus(c.get('title', ''), c.get('source', ''), c.get('abstract', '')) if cat == 'legal' else 0.0
+        raw_knn_adjustment = round(knn_prediction - base_quality, 1)
+        knn_adjustment = min(raw_knn_adjustment, 0.8)
+        quality_after_knn = round(base_quality + knn_adjustment, 1)
+        c['base_quality_score'] = round(base_quality, 1)
+        c['knn_prediction'] = round(knn_prediction, 1)
+        c['knn_score'] = round(knn_prediction, 1)  # 兼容旧字段
+        c['knn_adjustment'] = round(knn_adjustment, 1)
+        c['personalization_bonus'] = interest_bonus
+        c['interest_bonus'] = interest_bonus
+        c['long_term_profile_matches'] = long_matches
+        c['dynamic_profile_matches'] = dynamic_matches
+        c['region_bonus'] = round(region_bonus, 1)
         c['topic_cluster'] = classify_topic(c)
-        c['score'] = authority_calibrate(c, score)
+        c['quality_after_knn'] = quality_after_knn
+        c['score'] = authority_calibrate(c, quality_after_knn + interest_bonus + region_bonus)
+        c['final_score'] = c['score']
+        c['score_adjustment'] = round(c['final_score'] - c['base_quality_score'], 1)
         c['confidence'] = conf
         scored.append(c)
     # 全国正式规范存在时，地域加成只作为同层级微调：普通地方稿不因 +0.8/+0.6 超过规范层级稿。
-    has_formal_authority = any(c.get("authority_tier", 0) == 3 for c in scored)
+    has_formal_authority = any(c.get("authority_rank", 0) == 3 for c in scored)
     if has_formal_authority:
         for c in scored:
-            if c.get("authority_tier", 0) < 3 and c.get("region") in ("深圳", "广东", "粤港澳大湾区", "湖南") and c.get("score", 0) > 9.0:
+            if c.get("authority_rank", 0) < 3 and c.get("region") in ("深圳", "广东", "粤港澳大湾区", "湖南") and c.get("score", 0) > 9.0:
                 old = c["score"]
                 c["score"] = 9.0
-                c["score_adjustment"] = round(c["score"] - c.get("knn_score", old), 1)
+                c["final_score"] = c["score"]
+                c["authority_adjustment"] = round(c["score"] - (c.get("quality_after_knn", old) + c.get("interest_bonus", 0) + c.get("region_bonus", 0)), 1)
+                c["score_adjustment"] = round(c["score"] - c.get("base_quality_score", old), 1)
                 c["authority_adjustment_reason"] = "存在全国正式规范候选，限制普通地域稿的地域加成排序上限为9.0"
     scored.sort(key=lambda x: x.get('score', 0), reverse=True)
     log_stage(report, "score", count=len(scored))
 
     # Stage 4: 写简报（返回 path + ai_selected + legal_selected）
     report_path, ai_selected, legal_selected, legal_remaining = write_report_fn(candidates, scored)
+    selected_urls = {c.get("url") for c in ai_selected + legal_selected}
+    radar_urls = {c.get("url") for c in legal_remaining[:8]}
+    for item in scored:
+        if item.get("url") in selected_urls:
+            item["selection_reason"] = "达到精选门槛，并通过来源/主题多样性与规范层级校准"
+        elif item.get("url") in radar_urls:
+            item["selection_reason"] = "未进入精选，保留为 Radar（评分/主题覆盖价值）"
+        else:
+            item["selection_reason"] = "未进入交付区：排序靠后或受到来源/主题多样性上限约束"
     report["report_path"] = report_path
     log_stage(report, "write_report", path=report_path)
 
@@ -652,7 +734,14 @@ if __name__ == '__main__':
     #   python3 run_pipeline.py candidates.jsonl     # CLI 模式：从候选文件跑全流程
     if len(sys.argv) > 1:
         candidates = load_candidates(sys.argv[1])
-        code, rep = run_pipeline(None, candidates_raw=candidates)
+        cli_settings = load_settings()
+        cli_settings.setdefault("output", {})
+        for flag in ("window-start", "window-end"):
+            if f"--{flag}" in sys.argv:
+                idx = sys.argv.index(f"--{flag}")
+                if idx + 1 < len(sys.argv):
+                    cli_settings["output"][flag.replace("-", "_")] = sys.argv[idx + 1]
+        code, rep = run_pipeline(None, candidates_raw=candidates, settings=cli_settings)
         print(f"exit_code={code}, candidates={rep['counts'].get('candidates')}, "
               f"imported={rep['counts'].get('imported')}, self_check={rep['self_check']}")
         print(f"report={rep.get('report_path')}")
