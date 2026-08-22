@@ -154,13 +154,14 @@ def summarize(rows, selected=None):
 def run_source_specific_adapters(plan=None, timeout=3):
     """按来源分流执行三类专用 adapter；任何失败只进入审计，不伪造候选。"""
     plan = plan or query_plan()
-    from people_court_case_database_adapter import run_queries as run_case_db
-    from fada_adapter import run_queries as run_fada
+    from fada_spc_official_adapter import run_queries as run_fada
     from shenzhen_court_adapter import run_queries as run_shenzhen
     buckets = [plan[0::3], plan[1::3], plan[2::3]]
-    outputs = [run_case_db(buckets[0], timeout=timeout), run_fada(buckets[1], timeout=timeout), run_shenzhen(buckets[2], timeout=timeout)]
+    outputs = [run_fada(buckets[1], timeout=timeout), run_shenzhen(buckets[2], timeout=timeout)]
     audit = []
     results = []
+    pending_case_db = [{"query": x["query"], "practice_domain": x["domain"], "source_target": "人民法院案例库", "execution_mode": "browser_login_required", "fallback_level": "pending", "source_access_verified": False, "request_status": "not_run_until_user_login", "result_count_raw": 0, "result_count_valid": 0, "result_urls": [], "error": "等待人民法院案例库本机扫码/登录态", "elapsed": None} for x in buckets[0]]
+    audit.extend(pending_case_db)
     for out in outputs:
         audit.extend(out.get("audit", [])); results.extend(out.get("results", []))
-    return {"query_count": len(plan), "direct_query_count": sum(1 for a in audit if a.get("fallback_level") == "direct"), "fallback_query_count": sum(1 for a in audit if a.get("fallback_level") != "direct"), "result_count_raw": sum(a.get("result_count_raw", 0) for a in audit), "result_count_valid": sum(a.get("result_count_valid", 0) for a in audit), "source_access_verified_count": sum(1 for a in audit if a.get("source_access_verified")), "errors": [a for a in audit if a.get("error")], "audit": audit, "results": results, "by_adapter": {"people_court_case_database_adapter": outputs[0], "fada_adapter": outputs[1], "shenzhen_court_adapter": outputs[2]}}
+    return {"query_count": len(plan), "direct_query_count": sum(1 for a in audit if a.get("fallback_level") == "direct"), "fallback_query_count": sum(1 for a in audit if a.get("fallback_level") not in ("direct", "pending")), "result_count_raw": sum(a.get("result_count_raw", 0) for a in audit), "result_count_valid": sum(a.get("result_count_valid", 0) for a in audit), "source_access_verified_count": sum(1 for a in audit if a.get("source_access_verified")), "errors": [a for a in audit if a.get("error") and a.get("fallback_level") != "pending"], "audit": audit, "results": results, "by_adapter": {"people_court_case_database_adapter": {"status": "requires_browser_login", "query_count": len(buckets[0]), "result_count_valid": 0, "source_access_verified_count": 0}, "fada_spc_official_adapter": outputs[0], "shenzhen_court_adapter": outputs[1]}}

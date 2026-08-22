@@ -42,6 +42,8 @@ cookies.json
 *.cookies.json
 storage_state.json
 *.storage-state.json
+rmfyalk_state.json
+rmfyalk_*.json
 playwright/.auth/
 .auth/
 browser-data/
