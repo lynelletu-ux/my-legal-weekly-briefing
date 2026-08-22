@@ -345,12 +345,12 @@ def select_diverse(scored, category, count, max_per_source, score_floor=0.0, max
     return selected, remaining
 
 
-def default_write_report(candidates, scored):
+def default_write_report(candidates, scored, settings_override=None):
     """简报写入：diversity-aware 选择 + 分数降序排列，返回 (路径, ai_selected, legal_selected, legal_remaining)。
 
     Stage 4.5 HTML 渲染复用全部 legal 条目（selected + remaining），remaining 供雷达区使用。
     """
-    settings = load_settings()
+    settings = settings_override or load_settings()
     out = settings.get('output', {})
     template = out.get('report_template', '周报_{date}.md')
     max_per_source = out.get('max_per_source', 2)
@@ -468,7 +468,7 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
     max_retries = pipeline_cfg.get('max_retries', 3)
     backoff = pipeline_cfg.get('backoff', 2)
     if write_report_fn is None:
-        write_report_fn = default_write_report
+        write_report_fn = lambda candidates, scored: default_write_report(candidates, scored, settings)
 
     window_start, window_end = resolve_window(settings)
     report = {"date": date.today().isoformat(), "window_start": window_start.isoformat(), "window_end": window_end.isoformat(), "stages": [], "counts": {}, "errors": []}
