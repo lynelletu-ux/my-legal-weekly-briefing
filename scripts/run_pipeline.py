@@ -504,6 +504,9 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
     # 写 run-report.json
     with open(BASE / "run-report.json", 'w') as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
+    run_report_artifact = output_dir(settings) / f"run-report-{date.today().isoformat()}.json"
+    run_report_artifact.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    report["run_report_path"] = str(run_report_artifact)
     machine_template = (settings.get('output', {}) or {}).get('machine_report_template', 'weekly-briefing-{date}.json')
     machine_path = output_dir(settings) / machine_template.format(date=date.today().isoformat())
     machine_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
