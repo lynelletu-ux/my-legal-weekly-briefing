@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import hashlib
 import os
 import shutil
 import tempfile
@@ -29,8 +30,9 @@ def atomic_write(path: Path, text: str):
 
 
 def selected_id(item):
-    # 与后端 selected_ids 兼容；优先使用显式 id，避免暴露本机路径或内部字段。
-    return str(item.get("id") or item.get("selected_id") or item.get("url") or item.get("title") or "")
+    # 与后端 selected_id 保持完全一致：稳定 hash，不使用 URL 作为公开 ID。
+    raw = json.dumps({"url": item.get("url", ""), "title": item.get("title", "")}, ensure_ascii=False, sort_keys=True, default=str).encode()
+    return hashlib.sha256(raw).hexdigest()[:16]
 
 
 PUBLIC_FIELDS = (
@@ -56,6 +58,19 @@ def sanitize(item):
         if key in item:
             out[key] = item[key]
     out["id"] = selected_id(item)
+    source = str(item.get("source", "") or "")
+    channel = str(item.get("source_channel", "") or "")
+    out["source_system"] = out.get("source_system") or {
+        "weread": "weread", "practice_case_discovery": "people_court_case_database",
+        "ai_web": "ai_web", "official_web": "official_web",
+    }.get(channel, "official_web")
+    if "fada" in source or "法答网" in source:
+        out["source_system"] = "fada"
+    elif "深圳" in source:
+        out["source_system"] = "shenzhen_court"
+    elif "人民法院案例库" in source:
+        out["source_system"] = "people_court_case_database"
+    out["source_access_verified"] = bool(item.get("source_access_verified", False))
     if "published_at" not in out:
         out["published_at"] = item.get("publish_time") or item.get("date")
     if "quality_score" not in out:
@@ -76,11 +91,11 @@ def source_status(report):
     fada = adapter("fada_spc_official_adapter")
     sz = adapter("shenzhen_court_adapter")
     return {
-        "weread": {"status": "ok" if channels.get("weread", 0) > 0 else "degraded", "candidate_count": channels.get("weread", 0)},
-        "people_court_case_database": {"status": "ok" if db.get("source_access_verified_count", 0) > 0 else "degraded", "source_access_verified": bool(db.get("source_access_verified_count", 0)), "candidate_count": db.get("result_count_valid", 0)},
-        "fada": {"status": "ok" if fada.get("source_access_verified_count", 0) > 0 else "degraded", "source_access_verified": bool(fada.get("source_access_verified_count", 0)), "candidate_count": fada.get("result_count_valid", 0)},
-        "shenzhen_courts": {"status": "ok" if sz.get("source_access_verified_count", 0) > 0 else "degraded", "source_access_verified": bool(sz.get("source_access_verified_count", 0)), "candidate_count": sz.get("result_count_valid", 0)},
-        "ai_web": {"status": "ok" if channels.get("ai_web", 0) > 0 else "degraded", "candidate_count": channels.get("ai_web", 0)},
+        "weread": {"status": "ok" if channels.get("weread", 0) > 0 else "degraded", "discovered_count": channels.get("weread", 0)},
+        "people_court_case_database": {"status": "ok" if db.get("source_access_verified_count", 0) > 0 else "degraded", "source_access_verified": bool(db.get("source_access_verified_count", 0)), "discovered_count": db.get("result_count_valid", 0)},
+        "fada": {"status": "ok" if fada.get("source_access_verified_count", 0) > 0 else "degraded", "source_access_verified": bool(fada.get("source_access_verified_count", 0)), "discovered_count": fada.get("result_count_valid", 0)},
+        "shenzhen_courts": {"status": "ok" if sz.get("source_access_verified_count", 0) > 0 else "degraded", "source_access_verified": bool(sz.get("source_access_verified_count", 0)), "discovered_count": sz.get("result_count_valid", 0)},
+        "ai_web": {"status": "ok" if channels.get("ai_web", 0) > 0 else "degraded", "discovered_count": channels.get("ai_web", 0)},
     }
 
 
@@ -117,7 +132,7 @@ def render_md(payload):
     m = payload["metrics"]
     lines += ["", "## 专项案例统计", "", f"- 候选：{m['practice_case_candidates']}；入选：{m['selected_practice_cases']}；命中率：{m['profile_case_hit_rate']}", f"- 噪音过滤：{m['noise_removed']}；去重：{m['dedupe_removed']}", "", "## 来源状态", ""]
     for k, v in payload["source_status"].items():
-        lines.append(f"- {k}：`{v['status']}`，候选 {v.get('candidate_count', 0)}")
+        lines.append(f"- {k}：`{v['status']}`，发现 {v.get('discovered_count', 0)}")
     return "\n".join(lines) + "\n"
 
 
@@ -132,11 +147,11 @@ def publish(report_path: Path):
         return {"publish_ready": False, "status_path": str(PUBLISH / "status.json"), "failure_reason": status["failure_reason"]}
     fs = report.get("final_selection", {})
     payload = {
-        "schema_version": "1.0", "run_id": report.get("run_id", ""), "generated_at": datetime.now(timezone.utc).isoformat(),
+        "schema_version": "1.1", "run_id": report.get("run_id", ""), "generated_at": datetime.now(timezone.utc).isoformat(),
         "window_start": report.get("window_start", ""), "window_end": report.get("window_end", ""), "pipeline_status": "success", "publish_ready": True,
         "checks": {"self_check": True, "artifact_consistency_check": True, "errors": []},
         "source_status": source_status(report),
-        "metrics": {"total_candidates": report.get("counts", {}).get("candidates", 0), "wechat_candidates": report.get("counts", {}).get("by_channel_raw", {}).get("weread", 0), "practice_case_candidates": (report.get("practice_case_discovery") or {}).get("practice_case_candidates", 0), "selected_practice_cases": (report.get("practice_case_discovery") or {}).get("selected_practice_cases", 0), "profile_case_hit_rate": (report.get("practice_case_discovery") or {}).get("profile_case_hit_rate", 0), "practice_case_shortage": (report.get("practice_case_discovery") or {}).get("practice_case_shortage", False), "noise_removed": report.get("counts", {}).get("noise_removed", 0), "dedupe_removed": report.get("counts", {}).get("dedupe_removed", 0)},
+        "metrics": {"total_candidates": report.get("counts", {}).get("candidates", 0), "unique_candidate_count": report.get("counts", {}).get("candidates", 0), "wechat_candidates": report.get("counts", {}).get("by_channel_raw", {}).get("weread", 0), "practice_case_candidates": (report.get("practice_case_discovery") or {}).get("practice_case_candidates", 0), "selected_practice_cases": (report.get("practice_case_discovery") or {}).get("selected_practice_cases", 0), "profile_case_hit_rate": (report.get("practice_case_discovery") or {}).get("profile_case_hit_rate", 0), "practice_case_shortage": (report.get("practice_case_discovery") or {}).get("practice_case_shortage", False), "noise_removed": report.get("counts", {}).get("noise_removed", 0), "dedupe_removed": report.get("counts", {}).get("dedupe_removed", 0)},
         "ai_selected": [sanitize(x) for x in fs.get("ai", [])], "legal_selected": [sanitize(x) for x in fs.get("legal", [])], "radar": [sanitize(x) for x in fs.get("radar", [])],
         "input_hash": report.get("input_hash"), "candidate_pool_hash": report.get("candidate_pool_hash"), "selected_ids": report.get("selected_ids", {}),
     }
