@@ -81,6 +81,7 @@ def main():
 
     from run_pipeline import load_settings, run_pipeline
     settings = load_settings()
+    settings["discovery_mode"] = "live_in_memory"
     settings.setdefault("output", {})
     if args.window_start:
         settings["output"]["window_start"] = args.window_start

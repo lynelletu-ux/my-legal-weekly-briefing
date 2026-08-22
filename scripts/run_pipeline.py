@@ -532,7 +532,7 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
                     raise RetryableError("内容发现返回空")
                 return items
             candidates_raw = run_with_retry(_discover, max_retries, backoff)
-            log_stage(report, "discover", count=len(candidates_raw))
+            log_stage(report, "discover", count=len(candidates_raw), mode=settings.get("discovery_mode", "callable"))
         except RetryableError as e:
             candidates_raw = []
             report["errors"].append(f"discover 降级: {e}")
