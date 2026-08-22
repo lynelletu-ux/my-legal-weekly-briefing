@@ -58,11 +58,16 @@ def main():
     parser.add_argument("--window-end")
     parser.add_argument("--official-feed", type=Path, help="官方 Web 候选 JSON（可选）")
     parser.add_argument("--ai-feed", type=Path, help="AI+法律候选 JSON（可选）")
+    parser.add_argument("--practice-case-feed", type=Path, help="专项司法案例候选 JSON（可选；由案例库/法答网适配器生成）")
     args = parser.parse_args()
 
     candidates = discover_weread(args.days)
     candidates += load_feed(args.official_feed, "official_web", "legal")
     candidates += load_feed(args.ai_feed, "ai_web", "ai-legal")
+    if args.practice_case_feed:
+        from practice_case_discovery import normalize_case_feed
+        practice_rows = load_feed(args.practice_case_feed, "practice_case_discovery", "legal")
+        candidates += normalize_case_feed(practice_rows, args.window_start, args.window_end)
 
     from run_pipeline import load_settings, run_pipeline
     settings = load_settings()

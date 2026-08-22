@@ -322,7 +322,7 @@ def select_diverse(scored, category, count, max_per_source, score_floor=0.0, max
     cat_items = [c for c in scored if c.get('category') == category or (category == 'legal' and c.get('category') != 'ai-legal')]
     if category == 'legal' and min_profile:
         # 仅在质量门槛内优先画像相关候选；不降低 score_floor，也不突破 source/topic 上限。
-        cat_items = sorted(cat_items, key=lambda x: (x.get('authority_rank', 0) >= 2, x.get('score', 0) >= score_floor and x.get('profile_relevance_score', 0) >= 2, x.get('score', 0)), reverse=True)
+        cat_items = sorted(cat_items, key=lambda x: (x.get('authority_rank', 0) >= 2, x.get('practice_case', False), x.get('score', 0) >= score_floor and x.get('profile_relevance_score', 0) >= 2, x.get('score', 0)), reverse=True)
     if not max_per_source or max_per_source <= 0:
         selected = [c for c in cat_items[:count] if c.get('score', 0) >= score_floor]
         remaining = cat_items[len(selected):]
@@ -442,6 +442,8 @@ def default_write_report(candidates, scored, settings_override=None):
             parts = [src]
             if cat_tag:
                 parts.append(cat_tag)
+            if c.get('practice_case') and c.get('case_window') in ('30d', '90d'):
+                parts.append(f"近期值得补读·{c.get('case_window')}")
             f.write(f"📂 {' · '.join(parts)}\n\n")
             if abstract:
                 f.write(f"{abstract}\n\n")
@@ -535,6 +537,18 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
             candidates_raw = []
             report["errors"].append(f"discover 降级: {e}")
             log_stage(report, "discover", status="degraded", error=str(e))
+
+    # 独立专项案例池：由案例库/法答网/法院检索适配器注入；随后仍走同一套
+    # 时间门槛、噪音、去重、7维评分、k-NN 和 diversity-aware 选择。
+    practice_rows = [c for c in candidates_raw if c.get("practice_case") or c.get("discovery_stage") == "practice_case_discovery"]
+    try:
+        from practice_case_discovery import summarize as summarize_practice_cases, query_plan as practice_query_plan
+        report["practice_case_discovery"] = summarize_practice_cases(practice_rows)
+        report["practice_case_discovery"]["target_range"] = [12, 20]
+        report["practice_case_discovery"]["query_count"] = len(practice_query_plan())
+    except Exception as exc:
+        report["practice_case_discovery"] = {"practice_case_candidates": len(practice_rows), "error": str(exc)}
+    log_stage(report, "practice_case_discovery", count=len(practice_rows), target=[12, 20], mode="adapter_feed" if practice_rows else "no_adapter_feed")
 
     # Stage 2: 硬时间门槛（窗口外内容先退出当期期刊；carryover 仅显式标记时允许）
     raw_discovered_count = len(candidates_raw)
@@ -757,6 +771,17 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
         report["counts"]["selected_by_channel"][channel] = report["counts"]["selected_by_channel"].get(channel, 0) + 1
     report["radar"] = legal_remaining[:8]
     report["counts"]["radar"] = len(report["radar"])
+    # 专项池验收统计：明确 7d/30d/90d 回溯和最终命中率，不把回溯案例伪装成本周新文。
+    try:
+        from practice_case_discovery import summarize as summarize_practice_cases
+        practice_selected = [c for c in ai_selected + legal_selected + report["radar"] if c.get("practice_case")]
+        report["practice_case_discovery"].update(summarize_practice_cases(practice_rows, practice_selected))
+        report["practice_case_discovery"]["selected_practice_cases"] = len([c for c in legal_selected if c.get("practice_case")])
+        report["practice_case_discovery"]["practice_case_shortage"] = report["practice_case_discovery"].get("practice_case_candidates", 0) < 12
+        if report["practice_case_discovery"]["practice_case_shortage"]:
+            report["errors"].append("practice_case_shortage: 专项案例候选少于12条")
+    except Exception as exc:
+        report["errors"].append(f"practice_case统计失败: {exc}")
     report["ima_enabled"] = ima_enabled
 
     # 自检
