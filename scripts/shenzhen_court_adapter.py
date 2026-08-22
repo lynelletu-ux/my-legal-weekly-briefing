@@ -45,4 +45,5 @@ def run_queries(plan, timeout=12):
         else:
             audits.append(audit)
         results.extend(rows)
-    return {"query_count": len(plan), "direct_query_count": sum(a.get("fallback_level") == "direct" for a in audits), "fallback_query_count": sum(a.get("fallback_level") != "direct" for a in audits), "hit_courts": sorted({a["source_target"] for a in audits if a["source_access_verified"]}), "result_count_raw": sum(a["result_count_raw"] for a in audits), "result_count_valid": sum(a["result_count_valid"] for a in audits), "source_access_verified_count": sum(a["source_access_verified"] for a in audits), "errors": [a for a in audits if a.get("error")], "audit": audits, "results": results}
+    unique = {r.get("url"): r for r in results if r.get("url")}
+    return {"query_count": len(plan), "direct_query_count": sum(a.get("fallback_level") == "direct" for a in audits), "fallback_query_count": sum(a.get("fallback_level") != "direct" for a in audits), "hit_courts": sorted({a["source_target"] for a in audits if a["source_access_verified"]}), "result_count_raw": sum(a["result_count_raw"] for a in audits), "result_count_valid": len(unique), "source_access_verified_count": sum(a["source_access_verified"] for a in audits), "errors": [a for a in audits if a.get("error")], "audit": audits, "results": list(unique.values())}

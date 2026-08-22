@@ -88,6 +88,9 @@ def normalize_case_feed(rows, window_start, window_end):
         row.setdefault("source", row.get("institution") or row.get("_source", ""))
         row.setdefault("abstract", row.get("digest", ""))
         row = assign_case_window(row, window_start, window_end)
+        if row.get("practice_case") and not row.get("publish_time") and row.get("source_provenance") in ("official_republish", "direct"):
+            row["case_window"] = "90d"
+            row["carryover"] = True
         row.setdefault("practice_domain_confidence", domain_confidence(row))
         # 专项池要求候选必须是可复核裁判材料；对明确的典型案例/案例库材料补齐
         # 七维特征的“有规则、有案例、可操作”信号，不改变普通资讯评分。
