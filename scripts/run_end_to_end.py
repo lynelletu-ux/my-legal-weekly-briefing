@@ -61,6 +61,7 @@ def main():
     parser.add_argument("--ai-feed", type=Path, help="AI+法律候选 JSON（可选）")
     parser.add_argument("--practice-case-feed", type=Path, help="专项司法案例候选 JSON（可选；由案例库/法答网适配器生成）")
     parser.add_argument("--practice-query-audit", type=Path, help="专项查询逐条审计 JSON（必须由真实适配器写出）")
+    parser.add_argument("--run-source-adapters", action="store_true", help="真实执行人民法院案例库/法答网/深圳法院 source-specific adapters")
     args = parser.parse_args()
 
     if args.weread_feed:
@@ -85,6 +86,13 @@ def main():
     settings["discovery_mode"] = "live_in_memory"
     if args.practice_query_audit:
         settings["_practice_query_audit"] = json.loads(args.practice_query_audit.read_text(encoding="utf-8"))
+    if args.run_source_adapters:
+        from practice_case_discovery import run_source_specific_adapters, normalize_case_feed
+        adapter_out = run_source_specific_adapters()
+        settings["_practice_query_audit"] = adapter_out["audit"]
+        settings["_source_adapter_report"] = adapter_out
+        adapter_rows = normalize_case_feed(adapter_out.get("results", []), args.window_start, args.window_end)
+        candidates += adapter_rows
     settings.setdefault("output", {})
     if args.window_start:
         settings["output"]["window_start"] = args.window_start
