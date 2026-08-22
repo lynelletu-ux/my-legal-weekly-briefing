@@ -163,8 +163,19 @@ def run_source_specific_adapters(plan=None, timeout=3):
     outputs = [run_fada(buckets[1], timeout=timeout), run_shenzhen(buckets[2], timeout=timeout)]
     audit = []
     results = []
-    pending_case_db = [{"query": x["query"], "practice_domain": x["domain"], "source_target": "人民法院案例库", "execution_mode": "browser_login_required", "fallback_level": "pending", "source_access_verified": False, "request_status": "not_run_until_user_login", "result_count_raw": 0, "result_count_valid": 0, "result_urls": [], "error": "等待人民法院案例库本机扫码/登录态", "elapsed": None} for x in buckets[0]]
-    audit.extend(pending_case_db)
+    from pathlib import Path
+    state = Path.home() / ".config" / "rmfyalk_state.json"
+    if state.exists():
+        import asyncio
+        from people_court_case_database_browser_adapter import search_many
+        browser_audit = asyncio.run(search_many(buckets[0]))
+        audit.extend(browser_audit)
+        for a in browser_audit:
+            for url in a.get("result_urls", []):
+                results.append({"title": a.get("result_titles", {}).get(url, "人民法院案例库案例"), "url": url, "source": "人民法院案例库", "source_access_verified": True, "practice_domain": a.get("practice_domain", ""), "query": a.get("query", ""), "practice_case": True, "discovery_stage": "practice_case_discovery", "case_database_flag": True, "case_window": "90d", "carryover": True})
+    else:
+        pending_case_db = [{"query": x["query"], "practice_domain": x["domain"], "source_target": "人民法院案例库", "execution_mode": "browser_login_required", "fallback_level": "pending", "source_access_verified": False, "request_status": "not_run_until_user_login", "result_count_raw": 0, "result_count_valid": 0, "result_urls": [], "error": "等待人民法院案例库本机扫码/登录态", "elapsed": None} for x in buckets[0]]
+        audit.extend(pending_case_db)
     for out in outputs:
         audit.extend(out.get("audit", [])); results.extend(out.get("results", []))
-    return {"query_count": len(plan), "direct_query_count": sum(1 for a in audit if a.get("fallback_level") == "direct"), "fallback_query_count": sum(1 for a in audit if a.get("fallback_level") not in ("direct", "pending")), "result_count_raw": sum(a.get("result_count_raw", 0) for a in audit), "result_count_valid": sum(a.get("result_count_valid", 0) for a in audit), "source_access_verified_count": sum(1 for a in audit if a.get("source_access_verified")), "errors": [a for a in audit if a.get("error") and a.get("fallback_level") != "pending"], "audit": audit, "results": results, "by_adapter": {"people_court_case_database_adapter": {"status": "requires_browser_login", "query_count": len(buckets[0]), "result_count_valid": 0, "source_access_verified_count": 0}, "fada_spc_official_adapter": outputs[0], "shenzhen_court_adapter": outputs[1]}}
+    return {"query_count": len(plan), "direct_query_count": sum(1 for a in audit if a.get("fallback_level") == "direct"), "fallback_query_count": sum(1 for a in audit if a.get("fallback_level") not in ("direct", "pending")), "result_count_raw": sum(a.get("result_count_raw", 0) for a in audit), "result_count_valid": sum(a.get("result_count_valid", 0) for a in audit), "source_access_verified_count": sum(1 for a in audit if a.get("source_access_verified")), "errors": [a for a in audit if a.get("error") and a.get("fallback_level") != "pending"], "audit": audit, "results": results, "by_adapter": {"people_court_case_database_browser_adapter": {"status": "executed" if state.exists() else "requires_browser_login", "query_count": len(buckets[0]), "result_count_valid": sum(a.get("result_count_valid", 0) for a in audit if a.get("source_target") == "人民法院案例库"), "source_access_verified_count": sum(1 for a in audit if a.get("source_target") == "人民法院案例库" and a.get("source_access_verified"))}, "fada_spc_official_adapter": outputs[0], "shenzhen_court_adapter": outputs[1]}}
