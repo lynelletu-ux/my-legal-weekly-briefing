@@ -1,0 +1,422 @@
+{
+  "schema_version": "1.1",
+  "run_id": "20260823T024252-3a88445d",
+  "generated_at": "2026-08-22T18:59:27.240445+00:00",
+  "window_start": "2026-08-16",
+  "window_end": "2026-08-22",
+  "pipeline_status": "success",
+  "publish_ready": true,
+  "checks": {
+    "self_check": true,
+    "artifact_consistency_check": true,
+    "errors": []
+  },
+  "source_status": {
+    "weread": {
+      "status": "ok",
+      "discovered_count": 32
+    },
+    "people_court_case_database": {
+      "status": "ok",
+      "source_access_verified": true,
+      "discovered_count": 22
+    },
+    "fada": {
+      "status": "ok",
+      "source_access_verified": true,
+      "discovered_count": 5
+    },
+    "shenzhen_courts": {
+      "status": "ok",
+      "source_access_verified": true,
+      "discovered_count": 24
+    },
+    "ai_web": {
+      "status": "ok",
+      "discovered_count": 6
+    }
+  },
+  "metrics": {
+    "total_candidates": 47,
+    "unique_candidate_count": 47,
+    "wechat_candidates": 41,
+    "practice_case_candidates": 14,
+    "selected_practice_cases": 5,
+    "profile_case_hit_rate": 0.8,
+    "practice_case_shortage": false,
+    "noise_removed": 7,
+    "dedupe_removed": 5
+  },
+  "ai_selected": [
+    {
+      "title": "The new economics of AI-powered legal services",
+      "url": "https://legal.thomsonreuters.com/blog/category/artificial-intelligence/",
+      "source": "Thomson Reuters",
+      "source_bucket": "Thomson Reuters",
+      "publish_time": "2026-08-21",
+      "category": "ai-legal",
+      "practice_domain_confidence": 1.0,
+      "carryover": false,
+      "score": 9.2,
+      "final_score": 9.2,
+      "base_quality_score": 8.2,
+      "profile_relevance_score": 0,
+      "authority_tier": "D",
+      "priority_lane": "normal",
+      "topic_cluster": "律所AI落地",
+      "abstract": "讨论AI驱动法律服务和律所经营模式的变化。",
+      "selection_reason": "达到精选门槛，并通过来源/主题多样性与规范层级校准",
+      "long_term_profile_matches": [
+        "合同与债权债务"
+      ],
+      "dynamic_profile_matches": [],
+      "id": "27f1513d9fd90631",
+      "source_system": "ai_web",
+      "source_access_verified": false,
+      "published_at": "2026-08-21",
+      "quality_score": 8.2
+    },
+    {
+      "title": "SRA发布法律行业安全负责使用AI警示",
+      "url": "https://www.sra.org.uk/solicitors/resources/ai/",
+      "source": "SRA",
+      "source_bucket": "SRA",
+      "publish_time": "2026-08-20",
+      "category": "ai-legal",
+      "practice_domain_confidence": 1.0,
+      "carryover": false,
+      "score": 8.5,
+      "final_score": 8.5,
+      "base_quality_score": 7.7,
+      "profile_relevance_score": 0,
+      "authority_tier": "D",
+      "priority_lane": "normal",
+      "topic_cluster": "AI监管与职业责任",
+      "abstract": "英国监管机构关于法律行业安全、负责使用AI的职业责任提示。",
+      "selection_reason": "达到精选门槛，并通过来源/主题多样性与规范层级校准",
+      "long_term_profile_matches": [],
+      "dynamic_profile_matches": [],
+      "id": "637f17d479509273",
+      "source_system": "ai_web",
+      "source_access_verified": false,
+      "published_at": "2026-08-20",
+      "quality_score": 7.7
+    }
+  ],
+  "legal_selected": [
+    {
+      "title": "执行异议与追加变更被执行人案例（人民法院案例库）",
+      "url": "https://pccz.court.gov.cn/pcgg/ggxq?id=363D0C6040DB211B5F424DFCE32DD99",
+      "source": "人民法院案例库",
+      "source_bucket": "人民法院案例库",
+      "publish_time": "2026-06-01",
+      "category": "legal",
+      "practice_case": true,
+      "practice_domain": "强制执行与财产保全",
+      "practice_domain_confidence": 0.9,
+      "case_window": "90d",
+      "carryover": true,
+      "score": 9.7,
+      "final_score": 9.7,
+      "base_quality_score": 8.1,
+      "profile_relevance_score": 3,
+      "authority_tier": "A",
+      "priority_lane": "core_practice",
+      "topic_cluster": "公司股权",
+      "abstract": "惠州中院审理追加、变更被执行人异议之诉，明确公司责任与生效执行裁定理解边界。",
+      "selection_reason": "达到精选门槛，并通过来源/主题多样性与规范层级校准，画像相关候选优先",
+      "long_term_profile_matches": [
+        "公司商事与股权治理",
+        "强制执行",
+        "执行异议与追加变更"
+      ],
+      "dynamic_profile_matches": [
+        "执行异议及追加变更"
+      ],
+      "alternate_urls": [
+        "https://pccz.court.gov.cn/pcgg/ggxq?id=1885e0cbc12d4aeaa8b7a99842511ffd"
+      ],
+      "id": "55f7977c73196c54",
+      "source_system": "people_court_case_database",
+      "source_access_verified": false,
+      "published_at": "2026-06-01",
+      "quality_score": 8.1
+    },
+    {
+      "title": "最高法发布商业特许经营典型案例",
+      "url": "https://www.court.gov.cn/zixun/xiangqing/508501.html",
+      "source": "最高人民法院",
+      "source_bucket": "最高人民法院官网",
+      "publish_time": "2026-08-12",
+      "category": "legal",
+      "practice_case": true,
+      "practice_domain": "合同与债权债务",
+      "practice_domain_confidence": 0.9,
+      "case_window": "30d",
+      "carryover": true,
+      "score": 9.3,
+      "final_score": 9.3,
+      "base_quality_score": 8.9,
+      "profile_relevance_score": 2,
+      "authority_tier": "B",
+      "priority_lane": "core_practice",
+      "topic_cluster": "合同债权",
+      "abstract": "典型案例明确特许经营合同性质、动态履约能力审查与合同解除后的责任。",
+      "selection_reason": "达到精选门槛，并通过来源/主题多样性与规范层级校准，画像相关候选优先",
+      "long_term_profile_matches": [
+        "合同与债权债务"
+      ],
+      "dynamic_profile_matches": [],
+      "id": "cb58636a513bea80",
+      "source_system": "people_court_case_database",
+      "source_access_verified": false,
+      "published_at": "2026-08-12",
+      "quality_score": 8.9
+    },
+    {
+      "title": "最高法发布建设工程施工合同纠纷典型案例",
+      "url": "https://www.court.gov.cn/zixun/xiangqing/504211.html",
+      "source": "最高人民法院",
+      "source_bucket": "最高人民法院官网",
+      "publish_time": "2026-06-29",
+      "category": "legal",
+      "practice_case": true,
+      "practice_domain": "建设工程",
+      "practice_domain_confidence": 0.9,
+      "case_window": "90d",
+      "carryover": true,
+      "score": 9.3,
+      "final_score": 9.3,
+      "base_quality_score": 8.9,
+      "profile_relevance_score": 2,
+      "authority_tier": "B",
+      "priority_lane": "core_practice",
+      "topic_cluster": "建设工程房地产",
+      "abstract": "六个建设工程施工合同典型案例，涉及实际施工人、工程价款、合同解除与质量保证金。",
+      "selection_reason": "达到精选门槛，并通过来源/主题多样性与规范层级校准，画像相关候选优先",
+      "long_term_profile_matches": [
+        "合同与债权债务",
+        "建设工程",
+        "担保与追偿"
+      ],
+      "dynamic_profile_matches": [],
+      "id": "ddf4cfa7b7c3de52",
+      "source_system": "people_court_case_database",
+      "source_access_verified": false,
+      "published_at": "2026-06-29",
+      "quality_score": 8.9
+    },
+    {
+      "title": "基于合同履行的垄断民事纠纷管辖裁判要旨",
+      "url": "https://ipc.court.gov.cn/zh-cn/news/view-5979.html",
+      "source": "最高人民法院知识产权法庭",
+      "source_bucket": "最高法知识产权法庭",
+      "publish_time": "2026-08-01",
+      "category": "legal",
+      "practice_case": true,
+      "practice_domain": "民事诉讼程序与证据",
+      "practice_domain_confidence": 0.9,
+      "case_window": "30d",
+      "carryover": true,
+      "score": 9.1,
+      "final_score": 9.1,
+      "base_quality_score": 8.9,
+      "profile_relevance_score": 3,
+      "authority_tier": "C",
+      "priority_lane": "core_practice",
+      "topic_cluster": "合同债权",
+      "abstract": "明确合同解除、合同无效及后续责任请求下垄断民事纠纷的管辖规则。",
+      "selection_reason": "达到精选门槛，并通过来源/主题多样性与规范层级校准，画像相关候选优先",
+      "long_term_profile_matches": [
+        "合同与债权债务"
+      ],
+      "dynamic_profile_matches": [
+        "合同履行与违约"
+      ],
+      "id": "cab5693983d2f000",
+      "source_system": "people_court_case_database",
+      "source_access_verified": false,
+      "published_at": "2026-08-01",
+      "quality_score": 8.9
+    },
+    {
+      "title": "新技术条件下网络服务提供者内容责任认定",
+      "url": "https://ipc.court.gov.cn/zh-cn/news/view-3543.html",
+      "source": "最高人民法院知识产权法庭",
+      "source_bucket": "最高法知识产权法庭",
+      "publish_time": "2026-08-01",
+      "category": "legal",
+      "practice_case": true,
+      "practice_domain": "侵权与保险",
+      "practice_domain_confidence": 0.6,
+      "case_window": "30d",
+      "carryover": true,
+      "score": 9.1,
+      "final_score": 9.1,
+      "base_quality_score": 8.9,
+      "profile_relevance_score": 3,
+      "authority_tier": "C",
+      "priority_lane": "normal",
+      "topic_cluster": "民事程序与证据",
+      "abstract": "裁判要旨讨论网络服务提供者内容责任、举证责任和损害赔偿边界。",
+      "selection_reason": "达到精选门槛，并通过来源/主题多样性与规范层级校准，画像相关候选优先",
+      "long_term_profile_matches": [
+        "合同与债权债务",
+        "证据与证明",
+        "侵权与损害赔偿"
+      ],
+      "dynamic_profile_matches": [
+        "民事证据审查"
+      ],
+      "id": "895369929f735533",
+      "source_system": "people_court_case_database",
+      "source_access_verified": false,
+      "published_at": "2026-08-01",
+      "quality_score": 8.9
+    },
+    {
+      "title": "李强签署国务院令 公布《国务院关于修改〈住房公积金管理条例〉的决定》",
+      "url": "https://mp.weixin.qq.com/s?__biz=MzA4MDA0MzcwMA==&mid=2652733469&idx=1&sn=4e86e0221e2b2ef4210c145f49be1420&chksm=85d0eef048f54da31c3b79765c838733f16bc3a3b11146c83522963353eb1535044ebac32c7f#rd",
+      "source": "中国政府网",
+      "source_bucket": "中国政府网",
+      "publish_time": "2026-08-19 00:51",
+      "category": "legal",
+      "practice_domain_confidence": 1.0,
+      "carryover": false,
+      "score": 7.0,
+      "final_score": 7.0,
+      "base_quality_score": 5.4,
+      "profile_relevance_score": 0,
+      "authority_tier": "A",
+      "priority_lane": "authority",
+      "topic_cluster": "劳动与社会保障",
+      "abstract": "省、自治区人民政府住房城乡建设主管部门会同同级财政部门以及中国人民银行分支机构、国务院银行业监督管理机构派出机构，负责本行政区域内住房公积金管理法规、政策执行情况的监督。",
+      "selection_reason": "达到精选门槛，并通过来源/主题多样性与规范层级校准",
+      "long_term_profile_matches": [],
+      "dynamic_profile_matches": [],
+      "institution": "中国政府网",
+      "id": "cd77d8d80258b5aa",
+      "source_system": "weread",
+      "source_access_verified": false,
+      "published_at": "2026-08-19 00:51",
+      "quality_score": 5.4
+    },
+    {
+      "title": "一案入选司法服务保障绿美广东生态建设典型案例",
+      "url": "https://mp.weixin.qq.com/s?__biz=MzA3ODA0OTEyMg==&mid=2653978281&idx=1&sn=a5419446af77a06674e41f19340339de&chksm=853d8cb3514b4ee67735d5adfe4705077b134388dd3a9ef2bcb88b60672dc268909c94898f24#rd",
+      "source": "深圳市中级人民法院",
+      "source_bucket": "深圳市中级人民法院",
+      "publish_time": "2026-08-22 00:52",
+      "category": "legal",
+      "practice_domain_confidence": 1.0,
+      "carryover": false,
+      "score": 7.0,
+      "final_score": 7.0,
+      "base_quality_score": 5.4,
+      "profile_relevance_score": 2,
+      "authority_tier": "C",
+      "priority_lane": "normal",
+      "topic_cluster": "环境资源",
+      "abstract": "其中，深圳市中级人民法院《司法建议推动农业领域生态环境损害全域排查整治——林某、郑某非法占用农用地罪案》入选。一起来看！司法建议推动农业领域生态环境损害全域排查整治",
+      "selection_reason": "达到精选门槛，并通过来源/主题多样性与规范层级校准，画像相关候选优先",
+      "long_term_profile_matches": [
+        "合同与债权债务",
+        "侵权与损害赔偿"
+      ],
+      "dynamic_profile_matches": [],
+      "institution": "深圳市中级人民法院",
+      "id": "6633a1947d09ec12",
+      "source_system": "shenzhen_court",
+      "source_access_verified": false,
+      "published_at": "2026-08-22 00:52",
+      "quality_score": 5.4
+    }
+  ],
+  "radar": [
+    {
+      "title": "入选案例+1！涉生态建设",
+      "url": "https://mp.weixin.qq.com/s?__biz=MzkwMjE2NDI3NQ==&mid=2247531960&idx=1&sn=c85f375765ba869a49a5b88a8f289f48&chksm=c174a914579d44485b3e9dbae8da5000147f1c30031f4e7eeea57f68a8a70d34e89ba6649c99#rd",
+      "source": "东莞市中级人民法院",
+      "source_bucket": "东莞市中级人民法院",
+      "publish_time": "2026-08-20 00:54",
+      "category": "legal",
+      "practice_domain_confidence": 1.0,
+      "carryover": false,
+      "score": 7.0,
+      "final_score": 7.0,
+      "base_quality_score": 5.4,
+      "profile_relevance_score": 3,
+      "authority_tier": "C",
+      "priority_lane": "normal",
+      "topic_cluster": "环境资源",
+      "abstract": "东莞市中级人民法院审理认为，案涉生态环境损害系交通事故导致车辆所载化学品泄漏引发，不属于案涉免责条款约定的具有不可抗力性质的“污染”情形，某保险公司应对案涉生态环境损害承担赔偿责任。",
+      "selection_reason": "未进入精选，保留为 Radar（评分/主题覆盖价值）",
+      "long_term_profile_matches": [
+        "合同与债权债务",
+        "公司商事与股权治理",
+        "侵权与损害赔偿"
+      ],
+      "dynamic_profile_matches": [
+        "保险责任与侵权交叉"
+      ],
+      "institution": "东莞市中级人民法院",
+      "id": "2fa53655f5e18e09",
+      "source_system": "weread",
+      "source_access_verified": false,
+      "published_at": "2026-08-20 00:54",
+      "quality_score": 5.4
+    },
+    {
+      "title": "最高人民法院关于修改《最高人民法院关于审理著作权民事纠纷案件适用法律若干问题的解释》的决定",
+      "url": "https://mp.weixin.qq.com/s?__biz=MzA3MjEwNzYzOQ==&mid=2650889996&idx=1&sn=02611727abe39fa72aebc8760ed68012&chksm=8563a4aa7cc6fdaea3557aef464b8109934b336af22ae3e9e876c4655d4ea18396ff73bed632#rd",
+      "source": "最高人民法院",
+      "source_bucket": "最高人民法院官网",
+      "publish_time": "2026-08-21 00:50",
+      "category": "legal",
+      "practice_domain_confidence": 1.0,
+      "carryover": false,
+      "score": 7.0,
+      "final_score": 7.0,
+      "base_quality_score": 5.4,
+      "profile_relevance_score": 0,
+      "authority_tier": "A",
+      "priority_lane": "authority",
+      "topic_cluster": "知识产权与平台",
+      "abstract": "最高人民法院 2026年8月19日 法释〔2026〕18号 最高人民法院 关于修改《最高人民法院关于审理著作权民事纠纷案件适用法律若干问题的解释》的决定",
+      "selection_reason": "未进入精选，保留为 Radar（评分/主题覆盖价值）",
+      "long_term_profile_matches": [],
+      "dynamic_profile_matches": [],
+      "institution": "最高人民法院",
+      "id": "04d0b3340e28f4c7",
+      "source_system": "weread",
+      "source_access_verified": false,
+      "published_at": "2026-08-21 00:50",
+      "quality_score": 5.4
+    }
+  ],
+  "input_hash": "ec33eece28a7f7ebc71a35c5697dd9f91f91bd50a377941975f07711392bca14",
+  "candidate_pool_hash": "5a4e8294ad46a17c63e6fe63d0ed461f37949445058a8d353bec1898ad41e9b7",
+  "selected_ids": {
+    "ai": [
+      "27f1513d9fd90631",
+      "637f17d479509273"
+    ],
+    "legal": [
+      "55f7977c73196c54",
+      "cb58636a513bea80",
+      "ddf4cfa7b7c3de52",
+      "cab5693983d2f000",
+      "895369929f735533",
+      "cd77d8d80258b5aa",
+      "6633a1947d09ec12"
+    ],
+    "radar": [
+      "2fa53655f5e18e09",
+      "04d0b3340e28f4c7"
+    ]
+  },
+  "publish_consistency_check": {
+    "ok": true,
+    "reason": ""
+  }
+}
