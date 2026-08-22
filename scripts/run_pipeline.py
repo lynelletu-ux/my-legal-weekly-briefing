@@ -263,7 +263,9 @@ def default_write_report(candidates, scored):
 
     with open(path, 'w') as f:
         report_date = date.today().isoformat()
-        f.write(f"# 法律周报 {report_date}\n\n")
+        window_start = (date.today() - __import__('datetime').timedelta(days=6)).strftime('%Y.%m.%d')
+        window_end = date.today().strftime('%m.%d')
+        f.write(f"# 📰 我的法律实务期刊｜{window_start}—{window_end}｜Codex试行版\n\n")
         f.write("## AI + 法律\n\n")
         for c in ai_selected:
             score = c.get('score', 0)
@@ -407,6 +409,12 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
             c["features"] = _infer_features(c)
 
     report["counts"]["candidates"] = len(candidates)
+    report["counts"]["input_candidates"] = len(candidates_raw)
+    report["counts"]["dedupe_removed"] = len(candidates_raw) - len(candidates)
+    report["counts"]["by_channel"] = {}
+    for item in candidates_raw:
+        channel = item.get("source_channel", "unknown")
+        report["counts"]["by_channel"][channel] = report["counts"]["by_channel"].get(channel, 0) + 1
     log_stage(report, "dedupe", before=len(candidates_raw), after=len(candidates))
 
     # Stage 3: 评分（调用 scoring_engine.predict）
@@ -434,7 +442,9 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
         sys.path.insert(0, str(BASE))
         from render_html import render_html as _render
         html_articles = []
-        for c in ai_selected + legal_selected + legal_remaining:
+        # Radar 对外交付最多 8 条；其余未入选候选仍保留在评分后的运行数据中。
+        radar_items = legal_remaining[:8]
+        for c in ai_selected + legal_selected + radar_items:
             html_articles.append({
                 "title": c.get("title", ""),
                 "url": c.get("url", ""),
@@ -479,7 +489,12 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
 
     # ChatGPT/自动化可直接消费的完整机器可读交付物。
     report["articles"] = ai_selected + legal_selected
-    report["radar"] = legal_remaining
+    report["counts"]["selected_by_channel"] = {}
+    for item in report["articles"]:
+        channel = item.get("source_channel", "unknown")
+        report["counts"]["selected_by_channel"][channel] = report["counts"]["selected_by_channel"].get(channel, 0) + 1
+    report["radar"] = legal_remaining[:8]
+    report["counts"]["radar"] = len(report["radar"])
     report["ima_enabled"] = ima_enabled
 
     # 自检
