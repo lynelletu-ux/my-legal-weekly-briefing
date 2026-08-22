@@ -230,6 +230,28 @@ def classify_source(candidate):
     title = candidate.get('title', '') or ''
     url = candidate.get('url', '') or ''
 
+    return source_bucket(candidate)
+
+
+def source_bucket(candidate):
+    """来源上限使用 source_bucket，不把所有最高法相关系统粗暴合并。"""
+    explicit = candidate.get("source_bucket")
+    if explicit:
+        return explicit
+    src = str(candidate.get('source', '') or '')
+    title = str(candidate.get('title', '') or '')
+    url = str(candidate.get('url', '') or '')
+    system = str(candidate.get('source_system', '') or '')
+    publisher = str(candidate.get('publisher', '') or '')
+    if candidate.get('case_database_flag') or '人民法院案例库' in src or '人民法院案例库' in system:
+        return '人民法院案例库'
+    if '法答网' in src or '法答网' in system:
+        return '法答网精选答问'
+    if '知识产权法庭' in src or '知识产权法庭' in system:
+        return '最高法知识产权法庭'
+    if '最高法' in src or '最高人民法院' in src or 'court.gov.cn' in (candidate.get('url','') or ''):
+        return '最高人民法院官网'
+
     # 法院公众号（精确匹配）
     if '山东高法' in src or '山东高法' in title:
         return '山东高法'
@@ -239,8 +261,6 @@ def classify_source(candidate):
         return '上海二中院'
     if '中国应用法学' in src or '中国应用法学' in title:
         return '中国应用法学'
-    if '最高法' in src or '最高人民法院' in src or 'court.gov.cn' in url:
-        return '最高法'
     if '全国人大' in src:
         return '全国人大'
     if '国务院' in src or '人社部' in src or 'gov.cn' in url:
@@ -367,9 +387,24 @@ def select_diverse(scored, category, count, max_per_source, score_floor=0.0, max
     返回: (selected, remaining) — selected 是入选的 N 条，remaining 是未入选的（可用于 IMA 导入）
     """
     cat_items = [c for c in scored if c.get('category') == category or (category == 'legal' and c.get('category') != 'ai-legal')]
-    if category == 'legal' and min_profile:
-        # 仅在质量门槛内优先画像相关候选；不降低 score_floor，也不突破 source/topic 上限。
-        cat_items = sorted(cat_items, key=lambda x: (x.get('authority_rank', 0) >= 2, x.get('practice_case', False), x.get('score', 0) >= score_floor and x.get('profile_relevance_score', 0) >= 2, x.get('score', 0)), reverse=True)
+    cat_items = [c for c in cat_items if c.get('score', 0) >= score_floor]
+    # 先按内容层级和核心实务通道排序，再做来源/主题微调；避免低分非核心稿挤掉高分核心案例。
+    def lane_rank(item):
+        lane = item.get('priority_lane', '')
+        if category == 'legal':
+            if item.get('must_consider') or item.get('authority_rank', 0) >= 3:
+                return 3
+            if lane == 'core_practice' or (item.get('practice_case') and item.get('profile_relevance_score', 0) >= 2 and item.get('practice_domain_confidence', 0) >= 0.7 and item.get('score', 0) >= 7.0):
+                return 2
+        return 1
+    cat_items = sorted(cat_items, key=lambda x: (lane_rank(x), x.get('score', 0)), reverse=True)
+    for idx, item in enumerate(cat_items, 1):
+        item['rank_before_diversity'] = idx
+        item['topic_bucket'] = classify_topic(item)
+        item['source_bucket'] = source_bucket(item)
+        item.setdefault('blocked_by', [])
+        item.setdefault('promoted_by', [])
+        item['diversity_override'] = False
     if not max_per_source or max_per_source <= 0:
         selected = [c for c in cat_items[:count] if c.get('score', 0) >= score_floor]
         remaining = cat_items[len(selected):]
@@ -385,7 +420,7 @@ def select_diverse(scored, category, count, max_per_source, score_floor=0.0, max
         if item.get('score', 0) < score_floor:
             remaining.append(item)
             continue
-        s = classify_source(item)
+        s = source_bucket(item)
         topic = classify_topic(item)
         if len(selected) >= count:
             remaining.append(item)
@@ -398,6 +433,10 @@ def select_diverse(scored, category, count, max_per_source, score_floor=0.0, max
             if item.get("authority_rank", 0) >= 2:
                 authority_count += 1
         else:
+            reasons = []
+            if source_counts.get(s, 0) >= max_per_source: reasons.append('same_source_cap')
+            if max_per_topic and topic_counts.get(topic, 0) >= max_per_topic: reasons.append('topic_diversity_cap')
+            item['blocked_by'] = reasons
             remaining.append(item)
 
     # 如果选不够 count 条（候选太少），允许同源重复——但补位仍须满足评分下限
@@ -409,7 +448,7 @@ def select_diverse(scored, category, count, max_per_source, score_floor=0.0, max
             if item.get('score', 0) < score_floor:
                 continue  # 宁缺毋滥：低分条不补位进精选
             topic = classify_topic(item)
-            s = classify_source(item)
+            s = source_bucket(item)
             if (source_counts.get(s, 0) >= max_per_source or (max_per_topic and topic_counts.get(topic, 0) >= max_per_topic)
                     or (max_authority and item.get("authority_rank", 0) >= 2 and authority_count >= max_authority)):
                 continue
@@ -422,7 +461,27 @@ def select_diverse(scored, category, count, max_per_source, score_floor=0.0, max
         remaining = [r for r in remaining if r not in overflow]
 
     # 按分数降序重排（diversity-aware selection 可能打乱顺序）
+    # 核心实务案例与普通内容相差 >=1.0 时，禁止 diversity 造成质量倒置；必要时替换最低的非核心条目。
+    if category == 'legal':
+        for candidate in list(remaining):
+            if candidate.get('priority_lane') != 'core_practice' and not (candidate.get('practice_case') and candidate.get('profile_relevance_score', 0) >= 2):
+                continue
+            weaker = [x for x in selected if x.get('priority_lane') != 'core_practice' and x.get('score', 0) <= candidate.get('score', 0) - 1.0]
+            if not weaker:
+                continue
+            victim = min(weaker, key=lambda x: x.get('score', 0))
+            # 替换核心候选；同源/主题限制仅在确有硬冲突时保留。
+            selected.remove(victim); remaining.remove(candidate); remaining.append(victim); selected.append(candidate)
+            candidate['diversity_override'] = True
+            candidate['promoted_by'] = ['core_practice_quality_guardrail']
+            victim['blocked_by'] = ['quality_inversion_guardrail']
     selected.sort(key=lambda x: x.get('score', 0), reverse=True)
+    for idx, item in enumerate(selected, 1):
+        item['rank_after_diversity'] = idx
+        item['final_disposition'] = 'selected'
+    for idx, item in enumerate(remaining, 1):
+        item['rank_after_diversity'] = idx
+        item['final_disposition'] = 'radar'
     return selected, remaining
 
 
@@ -714,6 +773,8 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
         c['quality_after_knn'] = quality_after_knn
         c['score'] = authority_calibrate(c, quality_after_knn + interest_bonus + region_bonus)
         c['final_score'] = c['score']
+        c['source_bucket'] = source_bucket(c)
+        c['priority_lane'] = 'core_practice' if (c.get('practice_case') and c.get('profile_relevance_score', 0) >= 2 and c.get('practice_domain_confidence', 0) >= 0.7 and c.get('final_score', 0) >= 7.0) else ('authority' if c.get('must_consider') else 'normal')
         c['score_adjustment'] = round(c['final_score'] - c['base_quality_score'], 1)
         c['confidence'] = conf
         scored.append(c)
@@ -735,10 +796,21 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
         if item.get("url") in selected_urls:
             profile_note = "，画像相关候选优先" if item.get("profile_relevance_score", 0) >= 2 else ""
             item["selection_reason"] = "达到精选门槛，并通过来源/主题多样性与规范层级校准" + profile_note
+            item["final_disposition"] = "selected"
         elif item.get("url") in radar_urls:
             item["selection_reason"] = "未进入精选，保留为 Radar（评分/主题覆盖价值）"
+            item["final_disposition"] = "radar"
         else:
             item["selection_reason"] = "未进入交付区：排序靠后或受到来源/主题多样性上限约束"
+            item["final_disposition"] = "filtered"
+        item.setdefault("source_bucket", source_bucket(item))
+        item.setdefault("topic_bucket", classify_topic(item))
+        item.setdefault("selection_stage", "final_selection")
+        item.setdefault("rank_before_diversity", None)
+        item.setdefault("rank_after_diversity", None)
+        item.setdefault("blocked_by", [])
+        item.setdefault("promoted_by", [])
+        item.setdefault("diversity_override", False)
     report["report_path"] = report_path
     log_stage(report, "write_report", path=report_path)
 
