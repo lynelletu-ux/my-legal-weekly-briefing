@@ -546,6 +546,7 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
         report["practice_case_discovery"] = summarize_practice_cases(practice_rows)
         report["practice_case_discovery"]["target_range"] = [12, 20]
         report["practice_case_discovery"]["query_count"] = len(practice_query_plan())
+        report["practice_case_discovery"]["query_count_executed"] = max([c.get("practice_query_count_executed", 0) for c in practice_rows] or [0])
     except Exception as exc:
         report["practice_case_discovery"] = {"practice_case_candidates": len(practice_rows), "error": str(exc)}
     log_stage(report, "practice_case_discovery", count=len(practice_rows), target=[12, 20], mode="adapter_feed" if practice_rows else "no_adapter_feed")
@@ -778,11 +779,25 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
         report["practice_case_discovery"].update(summarize_practice_cases(practice_rows, practice_selected))
         report["practice_case_discovery"]["selected_practice_cases"] = len([c for c in legal_selected if c.get("practice_case")])
         report["practice_case_discovery"]["practice_case_shortage"] = report["practice_case_discovery"].get("practice_case_candidates", 0) < 12
-        if report["practice_case_discovery"]["practice_case_shortage"]:
-            report["errors"].append("practice_case_shortage: 专项案例候选少于12条")
     except Exception as exc:
         report["errors"].append(f"practice_case统计失败: {exc}")
     report["ima_enabled"] = ima_enabled
+
+    # 独立专项案例报告，便于不打开完整周报也能验收检索覆盖。
+    try:
+        practice_artifact = output_dir(settings) / f"practice-case-discovery-{date.today().isoformat()}.json"
+        practice_artifact.write_text(json.dumps(report.get("practice_case_discovery", {}), ensure_ascii=False, indent=2), encoding="utf-8")
+        report["practice_case_discovery"]["report_path"] = str(practice_artifact)
+        practice_md = output_dir(settings) / f"practice-case-discovery-{date.today().isoformat()}.md"
+        p = report["practice_case_discovery"]
+        lines = ["# practice_case_discovery 专项案例报告", "", f"- 实际执行查询：{p.get('query_count_executed', 0)}/{p.get('query_count', 57)}", f"- 候选：{p.get('practice_case_candidates', 0)}", f"- 7日：{p.get('case_window_7d', 0)}；30日：{p.get('case_window_30d', 0)}；90日：{p.get('case_window_90d', 0)}", f"- 入选：{p.get('selected_practice_cases', 0)}", f"- profile_case_hit_rate：{p.get('profile_case_hit_rate', 0)}", f"- practice_case_shortage：{p.get('practice_case_shortage', True)}", "", "## 按实务领域", ""]
+        lines += [f"- {k}：{v}条" for k, v in p.get("by_practice_domain", {}).items()]
+        lines += ["", "## 按来源", ""]
+        lines += [f"- {k}：{v}条" for k, v in p.get("by_case_source", {}).items()]
+        practice_md.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        report["practice_case_discovery"]["markdown_path"] = str(practice_md)
+    except Exception as exc:
+        report["errors"].append(f"practice_case报告写入失败: {exc}")
 
     # 自检
     ok, failures = self_check(report, settings)

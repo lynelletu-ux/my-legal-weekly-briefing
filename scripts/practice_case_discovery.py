@@ -95,7 +95,7 @@ def summarize(rows, selected=None):
         by_source[source] = by_source.get(source, 0) + 1
         if window in by_window:
             by_window[window] += 1
-    return {
+    result = {
         "practice_case_candidates": len(rows or []),
         "by_practice_domain": by_domain,
         "by_case_source": by_source,
@@ -104,3 +104,7 @@ def summarize(rows, selected=None):
         "profile_case_hit_rate": round(sum(1 for x in (selected or []) if x.get("practice_case") and x.get("profile_relevance_score", 0) >= 2) / max(1, sum(1 for x in (selected or []) if x.get("practice_case"))), 3),
         "practice_case_shortage": len(rows or []) < 12,
     }
+    result["case_window_7d"] = by_window["7d"]
+    result["case_window_30d"] = by_window["30d"]
+    result["case_window_90d"] = by_window["90d"]
+    return result

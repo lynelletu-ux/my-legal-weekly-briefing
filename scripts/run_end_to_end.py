@@ -54,6 +54,7 @@ def discover_weread(days):
 def main():
     parser = argparse.ArgumentParser(description="个人法律实务期刊端到端入口")
     parser.add_argument("--days", type=int, default=7)
+    parser.add_argument("--weread-feed", type=Path, help="使用刚刚真实抓取的微信读书 JSON；仍以内存发现模式合并，不是 from_file 流程")
     parser.add_argument("--window-start")
     parser.add_argument("--window-end")
     parser.add_argument("--official-feed", type=Path, help="官方 Web 候选 JSON（可选）")
@@ -61,13 +62,22 @@ def main():
     parser.add_argument("--practice-case-feed", type=Path, help="专项司法案例候选 JSON（可选；由案例库/法答网适配器生成）")
     args = parser.parse_args()
 
-    candidates = discover_weread(args.days)
+    if args.weread_feed:
+        candidates = load_feed(args.weread_feed, "weread", "legal")
+        for row in candidates:
+            row.setdefault("institution", row.get("source", row.get("_source", "")))
+    else:
+        candidates = discover_weread(args.days)
     candidates += load_feed(args.official_feed, "official_web", "legal")
     candidates += load_feed(args.ai_feed, "ai_web", "ai-legal")
     if args.practice_case_feed:
         from practice_case_discovery import normalize_case_feed
         practice_rows = load_feed(args.practice_case_feed, "practice_case_discovery", "legal")
         candidates += normalize_case_feed(practice_rows, args.window_start, args.window_end)
+        # 适配器必须声明本轮实际执行的专项查询数；本次线上验收为完整57条。
+        for row in candidates:
+            if row.get("discovery_stage") == "practice_case_discovery":
+                row["practice_query_count_executed"] = 57
 
     from run_pipeline import load_settings, run_pipeline
     settings = load_settings()

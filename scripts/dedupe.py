@@ -69,6 +69,22 @@ def dedupe_items(items, threshold=0.85):
         if not dup:
             seen.append({'title': title, 'url': url})
             result.append(item)
+        else:
+            # 保留同一案例在案例库、法院官网、公众号或转载页的追溯地址，
+            # 但只输出一个主记录进入评分和精选。
+            for existing in result:
+                et = normalize_title(existing.get('title', ''))
+                eu = canonical_url(existing.get('url', ''))
+                if (url and eu == url) or (title and et and similarity(title, et) >= threshold):
+                    alternates = list(existing.get('alternate_urls') or [])
+                    if item.get('url') and item.get('url') != existing.get('url') and item.get('url') not in alternates:
+                        alternates.append(item.get('url'))
+                    for alt in item.get('alternate_urls') or []:
+                        if alt not in alternates and alt != existing.get('url'):
+                            alternates.append(alt)
+                    if alternates:
+                        existing['alternate_urls'] = alternates
+                    break
     return result
 
 
