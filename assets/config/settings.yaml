@@ -1,0 +1,85 @@
+# 评分引擎与全局设置
+# 权重/阈值/兴趣赛道均可被开源用户按自身执业方向调整
+
+scoring:
+  # 配置 schema 版本（v2: AI+法律引入 signal_strength/domestic_relevance）
+  schema_version: 2
+  # 法律条目特征权重 v3（2026-07-28 8维重构）
+  # 老四维（author_tier/platform_tier/depth/relevance）已废弃，权重置 0 保留兼容
+  legal_weights:
+    case_density: 0.18           # 案例密度 — 有没有具体案子
+    norm_anchoring: 0.18         # 规范锚定 — 回到法条/司法解释/入库案例
+    actionability: 0.18          # 可操作性 — 读完能拿走的规则
+    author_empirical_depth: 0.16 # 作者实证深度 — 不看头衔看审级+论证功底
+    framework_quality: 0.12      # 框架定性 — 先定法域框架 vs 堆材料
+    relevance_halflife: 0.10     # 时效半衰期 — 基础方法永不过时 vs 前沿快过时
+    jurisdictional_proximity: 0.15  # 地域贴近度 — 浙江/金华法官=1, 其他=0（2026-08-01 上调：本地裁判规则对本地律师预判价值高）
+    # deprecated（保留兼容旧训练集）
+    author_tier: 0.00
+    platform_tier: 0.00
+    depth: 0.00
+    relevance: 0.00
+  # AI+法律条目特征权重（v2 重构）
+  # signal_strength: 1格局级/2应用落地/3融资动态（提供区分度，替代零方差的 author/platform）
+  # domestic_relevance: 0/1 国内参考价值（仅作呈现标签，不进排序——见 scoring_engine）
+  # author_tier/platform_tier: deprecated 置 0（保留字段兼容旧训练集，不删）
+  ai_legal_weights:
+    signal_strength: 0.50
+    depth: 0.25
+    relevance: 0.15
+    domestic_relevance: 0.10
+    author_tier: 0.00
+    platform_tier: 0.00
+  # k-NN 近邻数（固定 5，训练集扩大后可调）
+  k: 5
+  # 置信度阈值（仅用于写入报告元数据，不再视觉告警）
+  confidence_threshold: 0.80
+  # 训练集路径（相对 scripts/ 目录；缺失时引擎冷启动降级）
+  training_path: "../assets/data/scoring-training.jsonl"
+  # 兴趣赛道加成（标题命中 +0.3）
+  # 开源用户替换为自己的核心执业领域关键词
+  interest_keywords:
+    - "婚姻"
+    - "家事"
+    - "抚养"
+    - "继承"
+    - "离婚"
+    - "恋爱"
+    - "公司"
+    - "股东"
+    - "股权"
+    - "法人"
+    - "商标"
+    - "医疗"
+    - "诊疗"
+    - "知情"
+    - "执行"
+    - "股权执行"
+    - "强制执行"
+    - "担保"
+    - "追偿"
+
+output:
+  # 周报文件名模板
+  report_template: "周报_{date}.md"
+  # 候选池最小数量（自检断言用）
+  min_candidates: 10
+  # 交付条数
+  ai_legal_count: 3
+  legal_count: 7
+  # 来源多样性：同一来源在周报中最多出现的条数（0=不限制）
+  max_per_source: 2
+  # 精选区评分下限：低于此分不进精读区（宁缺毋滥，2026-08-01 修复 6.5 分低质条目混入精选）
+  select_score_floor: 7.0
+  # IMA 导入分数阈值（7.0 覆盖更多实务文章，周五增量期低分补录）
+  ima_import_threshold: 7.0
+  # 雷达区低分阈值（render_html.py 读取；低于此分的条目做低调视觉标记）
+  radar_score_ceiling: 7.0
+
+pipeline:
+  # 失败重试次数
+  max_retries: 3
+  # 重试退避基数（秒）
+  retry_backoff: 2
+  # 运行日志目录
+  runs_dir: ".workbuddy/runs"

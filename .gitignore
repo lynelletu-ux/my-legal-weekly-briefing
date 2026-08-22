@@ -1,0 +1,41 @@
+__pycache__/
+.DS_Store
+周报_demo_*.md
+周报_*.md
+run-report.json
+ima_import_queue.jsonl
+
+# === 安全红线：以下文件包含登录态/凭证/隐私数据，严禁提交 ===
+# MP 后台登录态
+cache/
+session.json
+*.session.json
+*.sess
+
+# 微信读书/元宝登录态（*_login.py 产物）与抓取产物
+we*.json
+*.state.json
+mp_articles_weread.json
+mp_articles_163.json
+wx_links.json
+yuanbao_links.json
+yuanbao_links.json.bak-*
+candidates_merged.jsonl
+
+# 本地配置（含 API 凭证等敏感信息）
+config/.env
+.env
+.env.*
+.workbuddy/
+
+# 运行生成文件
+mp_articles.json
+imported_cache.jsonl
+queued_cache.jsonl
+failed_import.jsonl
+needs_llm_classify.jsonl
+candidates.jsonl
+周报_*.html
+demo_data_*.json
+*.pyc
+scripts/.workbuddy/
