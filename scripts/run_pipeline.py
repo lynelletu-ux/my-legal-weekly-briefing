@@ -185,8 +185,80 @@ def classify_source(candidate):
         return '未知来源'
 
 
-def select_diverse(scored, category, count, max_per_source, score_floor=0.0):
-    """多样性感知选择：从已评分候选中选取 top N，同源不超过 max_per_source。
+def classify_topic(candidate):
+    """将候选归入可解释的主题簇，供精选区做第二层 diversity 控制。"""
+    text = " ".join(str(candidate.get(k, "") or "") for k in ("title", "abstract", "digest"))
+    clusters = [
+        ("环境资源与绿色司法", ("生态", "环境资源", "污染", "绿美", "碳排放", "自然资源", "环境损害")),
+        ("公司股权与治理", ("公司", "股东", "股权", "商事", "法人", "董事")),
+        ("合同债权与违约", ("合同", "债权", "债务", "违约", "履行", "委托", "服务")),
+        ("执行与保全", ("执行", "被执行人", "保全", "冻结", "查封", "执行异议")),
+        ("侵权与损害赔偿", ("侵权", "损害赔偿", "赔偿", "责任", "保险")),
+        ("诉讼程序与证据", ("证据", "举证", "证明", "管辖", "鉴定", "二审", "庭审")),
+        ("知识产权与平台", ("著作权", "商标", "专利", "平台", "网络", "个人信息")),
+    ]
+    for name, keywords in clusters:
+        if any(k in text for k in keywords):
+            return name
+    return "其他法律实务"
+
+
+def noise_reason(candidate):
+    """评分前噪音门禁：宣传/活动稿需有可迁移规则才可进入评分。"""
+    title = str(candidate.get("title", "") or "")
+    body = str(candidate.get("abstract", "") or "") + " " + str(candidate.get("digest", "") or "")
+    text = title + " " + body
+    event_markers = (
+        "工作推进会", "部署会", "总结会", "召开会议", "召开全市法院", "会议释放",
+        "党建", "参观", "调研", "文体活动", "周年", "双向奔赴", "文化巡礼",
+        "普法进企业", "普法活动", "普法", "讲座", "巡回庭审", "司法服务活动", "庭审开放日", "开放日", "宣传科", "法治文化",
+        "点赞", "青训营", "志愿服务", "征稿启事", "征稿", "栏目回顾",
+    )
+    substantive_markers = (
+        "裁判规则", "裁判要旨", "司法解释", "法释", "指导性案例", "案例库", "法答网",
+        "证据规则", "举证责任", "证明标准", "审查标准", "审理规则", "程序规则",
+        "责任认定", "法律规定", "条文", "典型案例", "判决", "裁定", "入选案例",
+    )
+    if any(k in title for k in ("征稿启事", "征稿")):
+        return "宣传/活动噪音：征稿/栏目宣传，不是可直接迁移的裁判规则"
+    if any(k in text for k in event_markers) and not any(k in text for k in substantive_markers):
+        hit = next(k for k in event_markers if k in text)
+        return f"宣传/活动噪音：命中“{hit}”且未发现可迁移裁判规则或规范变化"
+    return ""
+
+
+def authority_tier(candidate):
+    """规范层级标签；只识别明确规范/案例信号，不给所有官方稿统一加分。"""
+    text = " ".join(str(candidate.get(k, "") or "") for k in ("title", "abstract", "digest"))
+    source = str(candidate.get("source", "") or "")
+    if any(k in text for k in ("司法解释", "法释", "行政法规", "指导性案例", "人民法院案例库", "法答网")):
+        return 3
+    if "典型案例" in text or "裁判要旨" in text:
+        return 2
+    return 0
+
+
+def authority_calibrate(candidate, knn_score):
+    """k-NN 后置校准：保留原分数，同时保证明确全国规范层级优先。"""
+    tier = authority_tier(candidate)
+    candidate["authority_tier"] = tier
+    candidate["knn_score"] = knn_score
+    if tier == 3:
+        # 全国正式规范/高价值案例设最低优先级，但不把所有官方文章统一加分。
+        adjusted = max(knn_score, 9.1)
+        candidate["authority_adjustment_reason"] = "全国正式司法解释/指导性案例/案例库信号，设置 authority floor 9.1"
+    elif tier == 2:
+        adjusted = max(knn_score, 8.7)
+        candidate["authority_adjustment_reason"] = "明确典型案例或裁判要旨，设置较低 priority floor 8.7"
+    else:
+        adjusted = knn_score
+        candidate["authority_adjustment_reason"] = "无明确全国规范层级信号，保留 k-NN 与个人地域排序"
+    candidate["score_adjustment"] = round(adjusted - knn_score, 1)
+    return round(adjusted, 1)
+
+
+def select_diverse(scored, category, count, max_per_source, score_floor=0.0, max_per_topic=0):
+    """多样性感知选择：同源和同主题簇均受上限约束。
 
     scored: 已按分数降序排列的候选列表（含 score, category 等字段）
     category: 'ai-legal' | 'legal'（筛选条件）
@@ -203,6 +275,7 @@ def select_diverse(scored, category, count, max_per_source, score_floor=0.0):
         return selected, remaining
 
     source_counts = {}
+    topic_counts = {}
     selected = []
     remaining = []
     for item in cat_items:
@@ -211,12 +284,14 @@ def select_diverse(scored, category, count, max_per_source, score_floor=0.0):
             remaining.append(item)
             continue
         s = classify_source(item)
+        topic = classify_topic(item)
         if len(selected) >= count:
             remaining.append(item)
             continue
-        if source_counts.get(s, 0) < max_per_source:
+        if source_counts.get(s, 0) < max_per_source and (not max_per_topic or topic_counts.get(topic, 0) < max_per_topic):
             selected.append(item)
             source_counts[s] = source_counts.get(s, 0) + 1
+            topic_counts[topic] = topic_counts.get(topic, 0) + 1
         else:
             remaining.append(item)
 
@@ -228,7 +303,13 @@ def select_diverse(scored, category, count, max_per_source, score_floor=0.0):
                 break
             if item.get('score', 0) < score_floor:
                 continue  # 宁缺毋滥：低分条不补位进精选
+            topic = classify_topic(item)
+            s = classify_source(item)
+            if source_counts.get(s, 0) >= max_per_source or (max_per_topic and topic_counts.get(topic, 0) >= max_per_topic):
+                continue
             selected.append(item)
+            source_counts[s] = source_counts.get(s, 0) + 1
+            topic_counts[topic] = topic_counts.get(topic, 0) + 1
             overflow.append(item)
         remaining = [r for r in remaining if r not in overflow]
 
@@ -246,14 +327,15 @@ def default_write_report(candidates, scored):
     out = settings.get('output', {})
     template = out.get('report_template', '周报_{date}.md')
     max_per_source = out.get('max_per_source', 2)
+    max_per_topic = out.get('max_per_topic', 2)
     ai_count = out.get('ai_legal_count', 3)
     legal_count = out.get('legal_count', 7)
     path = output_dir(settings) / template.format(date=date.today().isoformat())
 
     # Diversity-aware selection
     score_floor = out.get('select_score_floor', 0)
-    ai_selected, ai_remaining = select_diverse(scored, 'ai-legal', ai_count, max_per_source, score_floor)
-    legal_selected, legal_remaining = select_diverse(scored, 'legal', legal_count, max_per_source, score_floor)
+    ai_selected, ai_remaining = select_diverse(scored, 'ai-legal', ai_count, max_per_source, score_floor, 0)
+    legal_selected, legal_remaining = select_diverse(scored, 'legal', legal_count, max_per_source, score_floor, max_per_topic)
 
     # AI+法律 signal_strength 标签映射
     signal_labels = {1: '格局级', 2: '应用落地级', 3: '融资动态级'}
@@ -394,7 +476,28 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
             report["errors"].append(f"discover 降级: {e}")
             log_stage(report, "discover", status="degraded", error=str(e))
 
-    # Stage 2: 去重
+    # Stage 2: 评分前噪音过滤（活动/宣传稿不因来源权威而自动获得高分）
+    raw_discovered_count = len(candidates_raw)
+    raw_channel_counts = {}
+    for item in candidates_raw:
+        channel = item.get("source_channel", "unknown")
+        raw_channel_counts[channel] = raw_channel_counts.get(channel, 0) + 1
+    noise_items = []
+    filtered_raw = []
+    for item in candidates_raw:
+        reason = noise_reason(item)
+        if reason:
+            item = dict(item)
+            item["noise_reason"] = reason
+            noise_items.append(item)
+        else:
+            filtered_raw.append(item)
+    candidates_raw = filtered_raw
+    report["noise"] = noise_items
+    report["counts"]["noise_removed"] = len(noise_items)
+    log_stage(report, "noise_filter", before=len(noise_items) + len(candidates_raw), after=len(candidates_raw), removed=len(noise_items))
+
+    # Stage 3: 去重
     from dedupe import dedupe_items
     candidates = dedupe_items(candidates_raw)
 
@@ -409,15 +512,16 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
             c["features"] = _infer_features(c)
 
     report["counts"]["candidates"] = len(candidates)
-    report["counts"]["input_candidates"] = len(candidates_raw)
+    report["counts"]["input_candidates"] = raw_discovered_count
     report["counts"]["dedupe_removed"] = len(candidates_raw) - len(candidates)
+    report["counts"]["by_channel_raw"] = raw_channel_counts
     report["counts"]["by_channel"] = {}
     for item in candidates_raw:
         channel = item.get("source_channel", "unknown")
         report["counts"]["by_channel"][channel] = report["counts"]["by_channel"].get(channel, 0) + 1
     log_stage(report, "dedupe", before=len(candidates_raw), after=len(candidates))
 
-    # Stage 3: 评分（调用 scoring_engine.predict）
+    # Stage 4: 评分（调用 scoring_engine.predict）+ 规范层级后置校准
     from scoring_engine import predict
     scored = []
     for c in candidates:
@@ -426,9 +530,20 @@ def run_pipeline(discover_fn, write_report_fn=None, import_fn=None, settings=Non
             "features": c.get('features', {}), "title": c.get('title', ''),
             "source": c.get('source', ''), "abstract": c.get('abstract', ''),
         }, cat)
-        c['score'] = score
+        c['knn_score'] = score
+        c['topic_cluster'] = classify_topic(c)
+        c['score'] = authority_calibrate(c, score)
         c['confidence'] = conf
         scored.append(c)
+    # 全国正式规范存在时，地域加成只作为同层级微调：普通地方稿不因 +0.8/+0.6 超过规范层级稿。
+    has_formal_authority = any(c.get("authority_tier", 0) == 3 for c in scored)
+    if has_formal_authority:
+        for c in scored:
+            if c.get("authority_tier", 0) < 3 and c.get("region") in ("深圳", "广东", "粤港澳大湾区", "湖南") and c.get("score", 0) > 9.0:
+                old = c["score"]
+                c["score"] = 9.0
+                c["score_adjustment"] = round(c["score"] - c.get("knn_score", old), 1)
+                c["authority_adjustment_reason"] = "存在全国正式规范候选，限制普通地域稿的地域加成排序上限为9.0"
     scored.sort(key=lambda x: x.get('score', 0), reverse=True)
     log_stage(report, "score", count=len(scored))
 
