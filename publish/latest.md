@@ -1,7 +1,7 @@
 # Codex 法律实务期刊｜Publish Layer v1.0
 
 - run_id：`20260823T024252-3a88445d`
-- 生成时间：2026-08-22T18:49:03.014676+00:00
+- 生成时间：2026-08-23T03:32:18.193503+00:00
 - 时间窗口：2026-08-16 — 2026-08-22
 - 后端状态：`success`；publish_ready：`True`
 
@@ -32,8 +32,8 @@
 
 ## 来源状态
 
-- weread：`ok`，候选 32
-- people_court_case_database：`ok`，候选 22
-- fada：`ok`，候选 5
-- shenzhen_courts：`ok`，候选 24
-- ai_web：`ok`，候选 6
+- weread：`ok`，发现 32
+- people_court_case_database：`ok`，发现 22
+- fada：`ok`，发现 5
+- shenzhen_courts：`ok`，发现 24
+- ai_web：`ok`，发现 6

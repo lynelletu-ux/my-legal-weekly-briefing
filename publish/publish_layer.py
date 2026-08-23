@@ -41,7 +41,9 @@ PUBLIC_FIELDS = (
     "case_window", "carryover", "score", "final_score", "quality_score", "base_quality_score",
     "profile_relevance_score", "authority_tier", "priority_lane", "topic_cluster", "abstract",
     "selection_reason", "source_access_verified", "long_term_profile_matches",
-    "dynamic_profile_matches", "institution", "region", "alternate_urls",
+    "dynamic_profile_matches", "institution", "region", "alternate_urls", "mirror_urls",
+    "discovery_channel", "original_url", "original_url_obtained", "original_url_type",
+    "content_access_verified", "verification_method",
 )
 
 
@@ -60,6 +62,18 @@ def sanitize(item):
     out["id"] = selected_id(item)
     source = str(item.get("source", "") or "")
     channel = str(item.get("source_channel", "") or "")
+    original_url = str(item.get("original_url") or item.get("url") or "")
+    is_wechat = original_url.startswith("https://mp.weixin.qq.com/")
+    out["url"] = original_url
+    out["original_url"] = original_url
+    out["original_url_obtained"] = bool(original_url.startswith(("https://", "http://")))
+    out["original_url_type"] = "wechat" if is_wechat else (
+        "court_database" if "rmfyalk.court.gov.cn" in original_url else
+        "fada" if "法答网" in source else
+        "official_web" if ".gov.cn" in original_url or ".court.gov.cn" in original_url else
+        "other"
+    )
+    out["discovery_channel"] = item.get("discovery_channel") or channel or "unknown"
     out["source_system"] = out.get("source_system") or {
         "weread": "weread", "practice_case_discovery": "people_court_case_database",
         "ai_web": "ai_web", "official_web": "official_web",
@@ -70,7 +84,22 @@ def sanitize(item):
         out["source_system"] = "shenzhen_court"
     elif "人民法院案例库" in source:
         out["source_system"] = "people_court_case_database"
-    out["source_access_verified"] = bool(item.get("source_access_verified", False))
+    # 旧字段保留为兼容别名：仅表示是否直连原始 URL 验证到正文，绝不代表 URL 是否已取得。
+    direct_verified = bool(item.get("content_access_verified", item.get("source_access_verified", False)))
+    out["content_access_verified"] = direct_verified
+    out["source_access_verified"] = direct_verified
+    mirrors = item.get("mirror_urls") or []
+    out["mirror_urls"] = [str(x) for x in mirrors if str(x).startswith(("https://", "http://"))]
+    if out["content_access_verified"]:
+        out["verification_method"] = "direct"
+    elif out["mirror_urls"]:
+        out["verification_method"] = "official_mirror"
+    elif is_wechat and channel == "weread":
+        out["verification_method"] = "weread"
+    elif out["original_url_obtained"]:
+        out["verification_method"] = "metadata_only"
+    else:
+        out["verification_method"] = "unverified"
     if "published_at" not in out:
         out["published_at"] = item.get("publish_time") or item.get("date")
     if "quality_score" not in out:
@@ -147,9 +176,15 @@ def publish(report_path: Path):
         return {"publish_ready": False, "status_path": str(PUBLISH / "status.json"), "failure_reason": status["failure_reason"]}
     fs = report.get("final_selection", {})
     payload = {
-        "schema_version": "1.1", "run_id": report.get("run_id", ""), "generated_at": datetime.now(timezone.utc).isoformat(),
+        "schema_version": "1.2", "run_id": report.get("run_id", ""), "generated_at": datetime.now(timezone.utc).isoformat(),
         "window_start": report.get("window_start", ""), "window_end": report.get("window_end", ""), "pipeline_status": "success", "publish_ready": True,
         "checks": {"self_check": True, "artifact_consistency_check": True, "errors": []},
+        "field_semantics": {
+            "original_url_obtained": "是否可靠取得原始发布页 URL；与正文直接访问状态无关。",
+            "content_access_verified": "是否通过原始 URL 直接访问/解析正文。",
+            "source_access_verified": "兼容字段，等同 content_access_verified；不表示 original_url_obtained。",
+            "mirror_urls": "仅用于交叉核验，绝不替换 url/original_url。",
+        },
         "source_status": source_status(report),
         "metrics": {"total_candidates": report.get("counts", {}).get("candidates", 0), "unique_candidate_count": report.get("counts", {}).get("candidates", 0), "wechat_candidates": report.get("counts", {}).get("by_channel_raw", {}).get("weread", 0), "practice_case_candidates": (report.get("practice_case_discovery") or {}).get("practice_case_candidates", 0), "selected_practice_cases": (report.get("practice_case_discovery") or {}).get("selected_practice_cases", 0), "profile_case_hit_rate": (report.get("practice_case_discovery") or {}).get("profile_case_hit_rate", 0), "practice_case_shortage": (report.get("practice_case_discovery") or {}).get("practice_case_shortage", False), "noise_removed": report.get("counts", {}).get("noise_removed", 0), "dedupe_removed": report.get("counts", {}).get("dedupe_removed", 0)},
         "ai_selected": [sanitize(x) for x in fs.get("ai", [])], "legal_selected": [sanitize(x) for x in fs.get("legal", [])], "radar": [sanitize(x) for x in fs.get("radar", [])],
