@@ -1,0 +1,9 @@
+{
+  "test_run": true,
+  "latest_attempt_run_id": "lidtest-20260823-7030a2c9",
+  "latest_attempt_status": "success",
+  "last_successful_run_id": "lidtest-20260823-7030a2c9",
+  "last_successful_generated_at": "2026-08-23T14:15:58.840326+08:00",
+  "failure_reason": [],
+  "branch": "lid-test-20260823"
+}
