@@ -1,7 +1,10 @@
 {
-  "latest_attempt_run_id": "20260823T024252-3a88445d",
+  "latest_attempt_run_id": "20260825T070316-633ea3b6",
   "latest_attempt_status": "success",
-  "last_successful_run_id": "20260823T024252-3a88445d",
-  "last_successful_generated_at": "2026-08-23T03:32:18.193503+00:00",
-  "failure_reason": []
+  "last_successful_run_id": "20260825T070316-633ea3b6",
+  "last_successful_generated_at": "2026-08-25T14:28:12.350899+00:00",
+  "failure_reason": [],
+  "query_count": 57,
+  "query_count_executed": 57,
+  "query_count_consistency": true
 }
