@@ -1,9 +1,10 @@
 {
-  "latest_attempt_run_id": "launchd-20260827T061500-74240",
-  "latest_attempt_status": "failed",
-  "last_successful_run_id": "20260825T070316-633ea3b6",
-  "last_successful_generated_at": "2026-08-25T14:28:12.350899+00:00",
-  "failure_reason": [
-    "pipeline failed; prior latest preserved"
-  ]
-}\n
+  "latest_attempt_run_id": "20260901T070108-e7b55cf5",
+  "latest_attempt_status": "success",
+  "last_successful_run_id": "20260901T070108-e7b55cf5",
+  "last_successful_generated_at": "2026-08-31T23:01:25.595742+00:00",
+  "failure_reason": [],
+  "query_count": 57,
+  "query_count_executed": 57,
+  "query_count_consistency": true
+}
