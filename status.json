@@ -1,10 +1,9 @@
 {
-  "latest_attempt_run_id": "20260917T070009-6ba46849",
-  "latest_attempt_status": "success",
+  "latest_attempt_run_id": "launchd-20260922T061500-25140",
+  "latest_attempt_status": "failed",
   "last_successful_run_id": "20260917T070009-6ba46849",
   "last_successful_generated_at": "2026-09-16T23:00:25.639382+00:00",
-  "failure_reason": [],
-  "query_count": 57,
-  "query_count_executed": 57,
-  "query_count_consistency": true
+  "failure_reason": [
+    "pipeline failed; prior latest preserved"
+  ]
 }
